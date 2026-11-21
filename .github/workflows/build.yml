@@ -1,0 +1,44 @@
+# Construit automatiquement « TBI Pro.exe » sur GitHub (onglet Actions → Artifacts).
+# Créer un tag vX.Y.Z publie aussi une « Release » téléchargeable.
+name: Build Windows
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Dépendances
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt pyinstaller
+      - name: PyInstaller
+        run: >
+          pyinstaller --noconfirm --clean --windowed --name "TBI Pro"
+          --icon tbipro/icon.ico
+          --add-data "tbipro/phone;tbipro/phone"
+          --add-data "tbipro/icon.ico;tbipro"
+          --exclude-module PySide6.QtWebEngineCore --exclude-module PySide6.Qt3DCore --exclude-module PySide6.QtQuick
+          --exclude-module tkinter --exclude-module matplotlib
+          run.py
+      - name: Archive
+        run: Compress-Archive -Path "dist/TBI Pro" -DestinationPath "TBI-Pro-Windows.zip"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: TBI-Pro-Windows
+          path: TBI-Pro-Windows.zip
+      - if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: TBI-Pro-Windows.zip

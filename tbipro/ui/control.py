@@ -1,0 +1,282 @@
+# -*- coding: utf-8 -*-
+"""Panneau de contrôle (sur l'écran de l'ordinateur de l'enseignant)."""
+import numpy as np
+from PySide6.QtCore import QPointF, QRectF, Qt, QTimer, Signal
+from PySide6.QtGui import QColor, QImage, QPainter, QPen, QPixmap, QPolygonF
+from PySide6.QtWidgets import (QCheckBox, QComboBox, QFormLayout, QFrame, QGridLayout, QGroupBox, QHBoxLayout,
+                               QLabel, QLineEdit, QMainWindow, QPushButton, QSlider, QSpinBox, QVBoxLayout, QWidget)
+
+from ..config import APP_NAME, VERSION
+from ..sources import SOURCES
+
+PEN_COLORS = {"blanc": "#ffffff", "rouge": "#f87171", "vert": "#4ade80", "bleu": "#60a5fa", "ir": "#f0abfc"}
+
+CSS = """
+QMainWindow, QWidget { background:#0f172a; color:#e2e8f0; font: 10pt "Segoe UI"; }
+QGroupBox { border:1px solid #1e293b; border-radius:10px; margin-top:14px; padding:10px; font-weight:600; }
+QGroupBox::title { subcontrol-origin: margin; left:10px; padding:0 4px; color:#7dd3fc; }
+QPushButton { background:#1e293b; border:1px solid #334155; border-radius:8px; padding:8px 12px; }
+QPushButton:hover { background:#273449; }
+QPushButton[mode="true"] { font-size:12pt; font-weight:700; padding:12px; }
+QPushButton[sel="true"] { background:#0369a1; border-color:#38bdf8; }
+QComboBox, QLineEdit, QSpinBox { background:#1e293b; border:1px solid #334155; border-radius:6px; padding:5px; }
+QLabel#status { font-weight:600; }
+QLabel#hint { color:#94a3b8; font-size:9pt; }
+"""
+
+
+def qr_pixmap(text, size=200):
+    """QR code dessiné avec QPainter (pas besoin de Pillow)."""
+    import qrcode
+    qr = qrcode.QRCode(border=2, error_correction=qrcode.constants.ERROR_CORRECT_M)
+    qr.add_data(text)
+    qr.make(fit=True)
+    m = qr.get_matrix()
+    n = len(m)
+    pm = QPixmap(size, size)
+    pm.fill(Qt.white)
+    p = QPainter(pm)
+    cell = size / n
+    p.setPen(Qt.NoPen)
+    p.setBrush(Qt.black)
+    for y, row in enumerate(m):
+        for x, v in enumerate(row):
+            if v:
+                p.drawRect(QRectF(x * cell, y * cell, cell + 0.5, cell + 0.5))
+    p.end()
+    return pm
+
+
+def preview_qimage(prev):
+    kind, data = prev
+    if kind == "jpeg":
+        img = QImage()
+        img.loadFromData(data)
+        return img
+    arr = np.ascontiguousarray(data[:, :, ::-1])
+    h, w = arr.shape[:2]
+    return QImage(arr.data, w, h, 3 * w, QImage.Format_RGB888).copy()
+
+
+class ControlPanel(QMainWindow):
+    source_changed = Signal()
+    mode_requested = Signal(str)
+    calibrate_requested = Signal(str)
+    screen_changed = Signal(int)
+    params_changed = Signal()
+    relearn_requested = Signal()
+
+    def __init__(self, cfg, screens):
+        super().__init__()
+        self.cfg = cfg
+        self.setWindowTitle(f"{APP_NAME} {VERSION} — Panneau de contrôle")
+        self.setStyleSheet(CSS)
+        self.resize(980, 680)
+        root = QWidget()
+        self.setCentralWidget(root)
+        lay = QHBoxLayout(root)
+
+        # ------------------------------------------------ colonne gauche
+        left = QVBoxLayout()
+        lay.addLayout(left, 0)
+
+        g = QGroupBox("1. Caméra")
+        f = QVBoxLayout(g)
+        self.src_combo = QComboBox()
+        for k, (label, _) in SOURCES.items():
+            self.src_combo.addItem(label, k)
+        self.src_combo.setCurrentIndex(max(0, self.src_combo.findData(cfg["source"])))
+        f.addWidget(self.src_combo)
+        row = QHBoxLayout()
+        self.cam_edit = QLineEdit()
+        self.cam_edit.setPlaceholderText("Numéro de caméra (0, 1…) ou adresse http://…")
+        row.addWidget(self.cam_edit, 1)
+        self.btn_apply = QPushButton("Appliquer")
+        row.addWidget(self.btn_apply)
+        self.cam_row = QWidget()
+        self.cam_row.setLayout(row)
+        row.setContentsMargins(0, 0, 0, 0)
+        f.addWidget(self.cam_row)
+        self.qr_lbl = QLabel()
+        self.qr_lbl.setAlignment(Qt.AlignCenter)
+        f.addWidget(self.qr_lbl)
+        self.url_lbl = QLabel()
+        self.url_lbl.setAlignment(Qt.AlignCenter)
+        self.url_lbl.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        f.addWidget(self.url_lbl)
+        self.hint_lbl = QLabel()
+        self.hint_lbl.setObjectName("hint")
+        self.hint_lbl.setWordWrap(True)
+        f.addWidget(self.hint_lbl)
+        self.btn_relearn = QPushButton("Réapprendre le fond infrarouge")
+        f.addWidget(self.btn_relearn)
+        self.status_lbl = QLabel("…")
+        self.status_lbl.setObjectName("status")
+        self.status_lbl.setWordWrap(True)
+        f.addWidget(self.status_lbl)
+        left.addWidget(g)
+
+        g = QGroupBox("2. Écran projeté et calibrage")
+        f = QVBoxLayout(g)
+        self.screen_combo = QComboBox()
+        self.set_screens(screens)
+        f.addWidget(self.screen_combo)
+        row = QHBoxLayout()
+        self.btn_cal_pen = QPushButton("🎯 Calibrer au stylet")
+        self.btn_cal_auto = QPushButton("⚡ Calibrage auto")
+        row.addWidget(self.btn_cal_pen)
+        row.addWidget(self.btn_cal_auto)
+        f.addLayout(row)
+        self.calib_lbl = QLabel()
+        self.calib_lbl.setObjectName("hint")
+        f.addWidget(self.calib_lbl)
+        left.addWidget(g)
+
+        g = QGroupBox("3. Mode")
+        f = QGridLayout(g)
+        self.mode_btns = {}
+        for i, (m, txt) in enumerate([("souris", "🖱️ Souris"), ("annoter", "🖊️ Annoter"), ("tableau", "📋 Tableau")]):
+            b = QPushButton(txt)
+            b.setProperty("mode", True)
+            b.clicked.connect(lambda _=False, m=m: self.mode_requested.emit(m))
+            self.mode_btns[m] = b
+            f.addWidget(b, 0, i)
+        self.laser_chk = QCheckBox("Pointeur laser en mode souris (clic = point immobile 1 s)")
+        self.laser_chk.setChecked(bool(cfg.get("laser")))
+        f.addWidget(self.laser_chk, 1, 0, 1, 3)
+        left.addWidget(g)
+        left.addStretch(1)
+
+        # ------------------------------------------------ colonne droite
+        right = QVBoxLayout()
+        lay.addLayout(right, 1)
+        g = QGroupBox("Vue de la caméra")
+        f = QVBoxLayout(g)
+        self.preview = QLabel("Aucune image")
+        self.preview.setMinimumSize(480, 270)
+        self.preview.setAlignment(Qt.AlignCenter)
+        self.preview.setStyleSheet("background:#020617;border-radius:8px;")
+        f.addWidget(self.preview, 1)
+        self.pens_lbl = QLabel("Stylets : —")
+        f.addWidget(self.pens_lbl)
+        right.addWidget(g, 1)
+
+        g = QGroupBox("Réglages de détection")
+        f = QFormLayout(g)
+        self.sl_thr = self._slider(50, 255, cfg["threshold"])
+        self.sl_min = self._slider(1, 60, cfg["min_area"])
+        self.sl_max = self._slider(20, 3000, cfg["max_area"])
+        self.sl_smooth = self._slider(0, 90, int(cfg["smoothing"] * 100))
+        f.addRow("Seuil de luminosité", self.sl_thr)
+        f.addRow("Taille mini du point", self.sl_min)
+        f.addRow("Taille maxi du point", self.sl_max)
+        f.addRow("Lissage du tracé", self.sl_smooth)
+        self.color_chk = QCheckBox("Distinguer les stylets par la couleur de la LED")
+        self.color_chk.setChecked(bool(cfg["color_pens"]))
+        f.addRow(self.color_chk)
+        self.pens_spin = QSpinBox()
+        self.pens_spin.setRange(1, 6)
+        self.pens_spin.setValue(int(cfg["max_pens"]))
+        f.addRow("Stylets simultanés (max)", self.pens_spin)
+        right.addWidget(g)
+
+        # signaux
+        self.src_combo.currentIndexChanged.connect(self._on_src)
+        self.btn_apply.clicked.connect(self._on_src)
+        self.btn_cal_pen.clicked.connect(lambda: self.calibrate_requested.emit("pen"))
+        self.btn_cal_auto.clicked.connect(lambda: self.calibrate_requested.emit("auto"))
+        self.screen_combo.currentIndexChanged.connect(self.screen_changed)
+        self.btn_relearn.clicked.connect(self.relearn_requested)
+        for w in (self.sl_thr, self.sl_min, self.sl_max, self.sl_smooth):
+            w.valueChanged.connect(self._on_params)
+        self.color_chk.toggled.connect(self._on_params)
+        self.pens_spin.valueChanged.connect(self._on_params)
+        self.laser_chk.toggled.connect(self._on_params)
+        self._sync_src_widgets()
+
+    def _slider(self, a, b, v):
+        s = QSlider(Qt.Horizontal)
+        s.setRange(a, b)
+        s.setValue(int(v))
+        return s
+
+    def set_screens(self, screens):
+        self.screen_combo.blockSignals(True)
+        self.screen_combo.clear()
+        for i, s in enumerate(screens):
+            g = s.geometry()
+            self.screen_combo.addItem(f"Écran {i + 1} : {s.name()} ({g.width()}×{g.height()})", s.name())
+        self.screen_combo.blockSignals(False)
+
+    def select_screen(self, idx):
+        self.screen_combo.blockSignals(True)
+        self.screen_combo.setCurrentIndex(idx)
+        self.screen_combo.blockSignals(False)
+
+    def _sync_src_widgets(self):
+        k = self.src_combo.currentData()
+        self.cam_row.setVisible(k in ("webcam", "ir"))
+        self.qr_lbl.setVisible(k == "phone")
+        self.url_lbl.setVisible(k == "phone")
+        self.btn_relearn.setVisible(k == "ir")
+        self.cam_edit.setText(str(self.cfg.get("ir_camera" if k == "ir" else "webcam", "0")))
+        hints = {
+            "phone": "Scannez le QR code avec le portable (même Wi-Fi que le PC). Si un avertissement de sécurité "
+                     "s'affiche : « Paramètres avancés » → « Continuer vers le site ». Autorisez ensuite la caméra.",
+            "webcam": "Webcam USB, ou portable utilisé comme webcam avec DroidCam / Iriun (souvent la caméra 1). "
+                      "Une adresse http://IP:4747/video fonctionne aussi avec DroidCam.",
+            "ir": "Caméra infrarouge (ou webcam équipée d'un filtre passe-IR) et stylet à LED IR 850/940 nm. "
+                  "Le fond infrarouge (soleil, lampes) est appris et soustrait automatiquement.",
+        }
+        self.hint_lbl.setText(hints.get(k, ""))
+
+    def _on_src(self):
+        k = self.src_combo.currentData()
+        self.cfg["source"] = k
+        if self.sender() is self.btn_apply:
+            self.cfg["ir_camera" if k == "ir" else "webcam"] = self.cam_edit.text().strip() or "0"
+        self._sync_src_widgets()
+        self.source_changed.emit()
+
+    def _on_params(self):
+        c = self.cfg
+        c["threshold"] = self.sl_thr.value()
+        c["min_area"] = self.sl_min.value()
+        c["max_area"] = max(self.sl_max.value(), c["min_area"] + 1)
+        c["smoothing"] = self.sl_smooth.value() / 100.0
+        c["color_pens"] = self.color_chk.isChecked()
+        c["max_pens"] = self.pens_spin.value()
+        c["laser"] = self.laser_chk.isChecked()
+        self.params_changed.emit()
+
+    def set_url(self, url):
+        if url:
+            self.qr_lbl.setPixmap(qr_pixmap(url, 200))
+            self.url_lbl.setText(url)
+
+    def set_mode(self, mode):
+        for m, b in self.mode_btns.items():
+            b.setProperty("sel", m == mode)
+            b.style().unpolish(b)
+            b.style().polish(b)
+
+    def show_preview(self, prev, blobs, roi):
+        if prev is None:
+            return
+        img = preview_qimage(prev)
+        if img.isNull():
+            return
+        pm = QPixmap.fromImage(img).scaled(self.preview.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation)
+        p = QPainter(pm)
+        p.setRenderHint(QPainter.Antialiasing)
+        W, H = pm.width(), pm.height()
+        if roi:
+            p.setPen(QPen(QColor("#38bdf8"), 2))
+            p.drawPolygon(QPolygonF([QPointF(x * W, y * H) for x, y in roi]))
+        for b in blobs:
+            p.setPen(QPen(QColor(PEN_COLORS.get(b[3], "#ffffff")), 3))
+            p.drawEllipse(QPointF(b[0] * W, b[1] * H), 12, 12)
+        p.end()
+        self.preview.setPixmap(pm)
+        names = ", ".join(b[3] for b in blobs) or "aucun"
+        self.pens_lbl.setText(f"Stylets vus : {names}")

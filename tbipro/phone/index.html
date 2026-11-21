@@ -1,0 +1,307 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<meta name="theme-color" content="#0b1220">
+<title>TBI Pro — Caméra</title>
+<style>
+  :root { --bg:#0b1220; --card:#141d2f; --txt:#e6ecf5; --mut:#8a97ad; --ok:#22c55e; --warn:#f59e0b; --bad:#ef4444; --acc:#38bdf8; }
+  * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  html,body { margin:0; height:100%; background:var(--bg); color:var(--txt); font:15px/1.4 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; }
+  #stage { position:fixed; inset:0; display:flex; align-items:center; justify-content:center; background:#000; }
+  video, #ov { position:absolute; max-width:100%; max-height:100%; }
+  #ov { pointer-events:none; }
+  #bar { position:fixed; left:0; right:0; top:0; padding:10px 12px; display:flex; gap:10px; align-items:center;
+         background:linear-gradient(#0b1220ee,#0b122000); }
+  #dot { width:12px; height:12px; border-radius:50%; background:var(--bad); flex:none; }
+  #status { flex:1; font-weight:600; }
+  #fps { color:var(--mut); font-variant-numeric:tabular-nums; }
+  #panel { position:fixed; left:0; right:0; bottom:0; padding:12px; background:var(--card); border-radius:16px 16px 0 0;
+           display:grid; gap:10px; transition:transform .25s; }
+  #panel.hidden { transform:translateY(calc(100% - 46px)); }
+  #toggle { text-align:center; color:var(--mut); font-size:13px; padding:2px 0 6px; }
+  label { display:grid; grid-template-columns:110px 1fr 46px; align-items:center; gap:8px; color:var(--mut); }
+  input[type=range] { width:100%; accent-color:var(--acc); }
+  .row { display:flex; gap:8px; }
+  button { flex:1; padding:12px; border:0; border-radius:10px; background:#1f2b44; color:var(--txt); font-weight:600; font-size:15px; }
+  button.primary { background:var(--acc); color:#04121f; }
+  #start { position:fixed; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:16px;
+           padding:24px; text-align:center; background:var(--bg); z-index:5; }
+  #start h1 { margin:0; font-size:22px; }
+  #start p { margin:0; color:var(--mut); max-width:420px; }
+  #start button { flex:none; padding:16px 28px; font-size:17px; }
+  .hint { font-size:13px; color:var(--mut); }
+</style>
+</head>
+<body>
+<div id="start">
+  <h1>TBI Pro — Caméra du tableau</h1>
+  <p>Posez le portable sur un support fixe, caméra arrière tournée vers la projection. Toute l'image projetée doit être visible.</p>
+  <button class="primary" id="go">Démarrer la caméra</button>
+  <p class="hint" id="err"></p>
+</div>
+
+<div id="stage">
+  <video id="v" playsinline muted autoplay></video>
+  <canvas id="ov"></canvas>
+</div>
+
+<div id="bar"><span id="dot"></span><span id="status">Connexion…</span><span id="fps"></span></div>
+
+<div id="panel" class="hidden">
+  <div id="toggle">▲ Réglages caméra</div>
+  <label id="expRow" style="display:none">Exposition <input type="range" id="exp"><span id="expV"></span></label>
+  <label id="isoRow" style="display:none">Sensibilité <input type="range" id="iso"><span id="isoV"></span></label>
+  <label id="zoomRow" style="display:none">Zoom <input type="range" id="zoom"><span id="zoomV"></span></label>
+  <div class="hint">Astuce : baissez l'exposition jusqu'à ce que la projection soit sombre et que seule la LED du stylet ressorte.</div>
+  <div class="row">
+    <button id="dim">Écran noir</button>
+    <button id="fs">Plein écran</button>
+  </div>
+</div>
+
+<canvas id="work" style="display:none"></canvas>
+
+<script>
+"use strict";
+const $ = id => document.getElementById(id);
+const video = $("v"), ov = $("ov"), octx = ov.getContext("2d");
+const work = $("work"), wctx = work.getContext("2d", { willReadFrequently: true });
+
+// Paramètres envoyés par le PC
+let cfg = { thr: 225, minA: 2, maxA: 400, roi: null };
+let ws = null, track = null, lastBlobs = [], frames = 0, fpsT = performance.now();
+let snapWanted = false, lastPreview = 0, dimmed = false;
+const PW = 640;           // largeur de traitement
+let PH = 360;
+
+// ---------------------------------------------------------------- connexion
+function connect() {
+  ws = new WebSocket((location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/ws");
+  ws.onopen = () => { setStatus("Connecté au PC", "ok"); sendInfo(); };
+  ws.onclose = () => { setStatus("Connexion perdue — nouvelle tentative…", "bad"); setTimeout(connect, 1000); };
+  ws.onerror = () => {};
+  ws.onmessage = ev => {
+    let m; try { m = JSON.parse(ev.data); } catch (e) { return; }
+    if (m.t === "cfg") { cfg = { thr: m.thr, minA: m.minA, maxA: m.maxA, roi: m.roi }; }
+    else if (m.t === "snap") { snapWanted = true; }
+  };
+}
+function send(o) { if (ws && ws.readyState === 1) ws.send(JSON.stringify(o)); }
+function setStatus(t, s) {
+  $("status").textContent = t;
+  $("dot").style.background = s === "ok" ? "var(--ok)" : s === "warn" ? "var(--warn)" : "var(--bad)";
+}
+function sendInfo() {
+  if (!track) return;
+  const st = track.getSettings();
+  send({ t: "info", txt: `(${st.width}×${st.height})` });
+}
+
+// ---------------------------------------------------------------- caméra
+async function startCamera() {
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    $("err").textContent = "Ce navigateur ne permet pas l'accès à la caméra. Utilisez Chrome (Android) ou Safari (iPhone).";
+    return;
+  }
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      audio: false,
+      video: { facingMode: { ideal: "environment" }, width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 60, min: 24 } }
+    });
+    video.srcObject = stream;
+    track = stream.getVideoTracks()[0];
+    await video.play();
+    $("start").style.display = "none";
+    setupControls();
+    keepAwake();
+    sendInfo();
+    if (video.requestVideoFrameCallback) video.requestVideoFrameCallback(onFrame);
+    else requestAnimationFrame(onFrame);
+  } catch (e) {
+    $("err").textContent = "Caméra refusée ou indisponible : " + e.message;
+  }
+}
+
+// Réglages matériels de la caméra (selon ce que le téléphone permet)
+function setupControls() {
+  const caps = track.getCapabilities ? track.getCapabilities() : {};
+  const st = track.getSettings();
+  function slider(row, inputId, valId, cap, name, current, extra) {
+    if (!cap || cap.max === undefined) return;
+    const el = $(inputId);
+    el.min = cap.min; el.max = cap.max; el.step = cap.step || (cap.max - cap.min) / 100;
+    el.value = current !== undefined ? current : cap.min;
+    $(valId).textContent = (+el.value).toFixed(1);
+    $(row).style.display = "grid";
+    el.oninput = async () => {
+      $(valId).textContent = (+el.value).toFixed(1);
+      const c = Object.assign({}, extra || {}); c[name] = +el.value;
+      try { await track.applyConstraints({ advanced: [c] }); } catch (e) {}
+    };
+  }
+  if (caps.exposureTime && caps.exposureMode && caps.exposureMode.includes("manual")) {
+    slider("expRow", "exp", "expV", caps.exposureTime, "exposureTime", st.exposureTime, { exposureMode: "manual" });
+  } else if (caps.exposureCompensation) {
+    slider("expRow", "exp", "expV", caps.exposureCompensation, "exposureCompensation", caps.exposureCompensation.min);
+    // par défaut : exposition au minimum (la projection devient sombre, la LED ressort)
+    track.applyConstraints({ advanced: [{ exposureCompensation: caps.exposureCompensation.min }] }).catch(() => {});
+  }
+  if (caps.iso && caps.exposureMode && caps.exposureMode.includes("manual")) {
+    slider("isoRow", "iso", "isoV", caps.iso, "iso", st.iso, { exposureMode: "manual" });
+  }
+  if (caps.zoom) slider("zoomRow", "zoom", "zoomV", caps.zoom, "zoom", st.zoom);
+  if (caps.focusMode && caps.focusMode.includes("continuous")) {
+    track.applyConstraints({ advanced: [{ focusMode: "continuous" }] }).catch(() => {});
+  }
+}
+
+async function keepAwake() {
+  try { if ("wakeLock" in navigator) await navigator.wakeLock.request("screen"); } catch (e) {}
+  document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") keepAwake(); }, { once: true });
+}
+
+// ---------------------------------------------------------------- détection
+function pointInPoly(x, y, poly) {
+  let inside = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const xi = poly[i][0], yi = poly[i][1], xj = poly[j][0], yj = poly[j][1];
+    if (((yi > y) !== (yj > y)) && (x < (xj - xi) * (y - yi) / ((yj - yi) || 1e-9) + xi)) inside = !inside;
+  }
+  return inside;
+}
+function expand(poly, m) {
+  let cx = 0, cy = 0; poly.forEach(p => { cx += p[0]; cy += p[1]; }); cx /= poly.length; cy /= poly.length;
+  return poly.map(p => [cx + (p[0] - cx) * (1 + m), cy + (p[1] - cy) * (1 + m)]);
+}
+function classify(r, g, b) {
+  const mx = Math.max(r, g, b), mn = Math.min(r, g, b);
+  if (mx - mn < 45) return "blanc";
+  if (mx === r) return "rouge";
+  if (mx === g) return "vert";
+  return "bleu";
+}
+
+// Composantes connexes des pixels plus lumineux que le seuil (même algorithme que sur le PC)
+let labels = null;
+function detect(data, w, h) {
+  const n = w * h, thr = cfg.thr;
+  if (!labels || labels.length !== n) labels = new Int32Array(n);
+  labels.fill(0);
+  const stack = new Int32Array(n);
+  const blobs = [];
+  const roi = cfg.roi ? expand(cfg.roi, 0.04) : null;
+  let lab = 0;
+  for (let i = 0; i < n; i++) {
+    if (labels[i]) continue;
+    const o = i * 4;
+    if (Math.max(data[o], data[o + 1], data[o + 2]) < thr) continue;
+    lab++;
+    let sp = 0, area = 0, sx = 0, sy = 0, hr = 0, hg = 0, hb = 0, hn = 0;
+    stack[sp++] = i; labels[i] = lab;
+    while (sp) {
+      const p = stack[--sp], x = p % w, y = (p / w) | 0, q = p * 4;
+      area++; sx += x; sy += y;
+      const r = data[q], g = data[q + 1], b = data[q + 2];
+      if (Math.min(r, g, b) < 245) { hr += r; hg += g; hb += b; hn++; }
+      const nb = [p - 1, p + 1, p - w, p + w];
+      for (let k = 0; k < 4; k++) {
+        const np = nb[k];
+        if (np < 0 || np >= n || labels[np]) continue;
+        if ((k === 0 && x === 0) || (k === 1 && x === w - 1)) continue;
+        const nq = np * 4;
+        if (Math.max(data[nq], data[nq + 1], data[nq + 2]) >= thr) { labels[np] = lab; stack[sp++] = np; }
+      }
+    }
+    if (area < cfg.minA || area > cfg.maxA) continue;
+    const cx = (sx / area + 0.5) / w, cy = (sy / area + 0.5) / h;
+    if (roi && !pointInPoly(cx, cy, roi)) continue;
+    // halo autour du point : couleur de la LED
+    let color = hn ? classify(hr / hn, hg / hn, hb / hn) : null;
+    if (!color || color === "blanc") color = haloColor(data, w, h, sx / area, sy / area, thr) || "blanc";
+    blobs.push([+cx.toFixed(5), +cy.toFixed(5), area, color]);
+  }
+  blobs.sort((a, b) => b[2] - a[2]);
+  return blobs.slice(0, 6);
+}
+function haloColor(data, w, h, cx, cy, thr) {
+  let r = 0, g = 0, b = 0, c = 0;
+  for (let dy = -4; dy <= 4; dy++) for (let dx = -4; dx <= 4; dx++) {
+    const x = Math.round(cx + dx), y = Math.round(cy + dy);
+    if (x < 0 || y < 0 || x >= w || y >= h) continue;
+    const q = (y * w + x) * 4, mx = Math.max(data[q], data[q + 1], data[q + 2]);
+    if (mx > thr * 0.55 && Math.min(data[q], data[q + 1], data[q + 2]) < 245) { r += data[q]; g += data[q + 1]; b += data[q + 2]; c++; }
+  }
+  return c ? classify(r / c, g / c, b / c) : null;
+}
+
+// ---------------------------------------------------------------- boucle image
+function onFrame() {
+  const vw = video.videoWidth, vh = video.videoHeight;
+  if (vw && vh) {
+    PH = Math.round(PW * vh / vw);
+    if (work.width !== PW || work.height !== PH) { work.width = PW; work.height = PH; }
+    wctx.drawImage(video, 0, 0, PW, PH);
+    const img = wctx.getImageData(0, 0, PW, PH);
+    lastBlobs = detect(img.data, PW, PH);
+    send({ t: "b", b: lastBlobs });
+    frames++;
+    const now = performance.now();
+    if (now - fpsT > 1000) { $("fps").textContent = Math.round(frames * 1000 / (now - fpsT)) + " img/s"; frames = 0; fpsT = now; }
+    if (snapWanted) {
+      snapWanted = false;
+      send({ t: "s", img: work.toDataURL("image/jpeg", 0.9) });
+    }
+    if (now - lastPreview > 400 && ws && ws.bufferedAmount < 200000) {
+      lastPreview = now;
+      const s = document.createElement("canvas"); s.width = 320; s.height = Math.round(320 * PH / PW);
+      s.getContext("2d").drawImage(work, 0, 0, s.width, s.height);
+      send({ t: "p", img: s.toDataURL("image/jpeg", 0.6) });
+    }
+    drawOverlay();
+  }
+  if (video.requestVideoFrameCallback) video.requestVideoFrameCallback(onFrame);
+  else requestAnimationFrame(onFrame);
+}
+
+function drawOverlay() {
+  if (dimmed) return;
+  const r = video.getBoundingClientRect();
+  if (ov.width !== Math.round(r.width) || ov.height !== Math.round(r.height)) { ov.width = Math.round(r.width); ov.height = Math.round(r.height); }
+  ov.style.left = r.left + "px"; ov.style.top = r.top + "px";
+  octx.clearRect(0, 0, ov.width, ov.height);
+  if (cfg.roi) {
+    octx.strokeStyle = "#38bdf8"; octx.lineWidth = 2; octx.beginPath();
+    cfg.roi.forEach((p, i) => i ? octx.lineTo(p[0] * ov.width, p[1] * ov.height) : octx.moveTo(p[0] * ov.width, p[1] * ov.height));
+    octx.closePath(); octx.stroke();
+  }
+  const col = { blanc: "#fff", rouge: "#f87171", vert: "#4ade80", bleu: "#60a5fa" };
+  lastBlobs.forEach(b => {
+    octx.strokeStyle = col[b[3]] || "#fff"; octx.lineWidth = 3;
+    octx.beginPath(); octx.arc(b[0] * ov.width, b[1] * ov.height, 16, 0, 7); octx.stroke();
+  });
+}
+
+// ---------------------------------------------------------------- interface
+$("go").onclick = startCamera;
+$("toggle").onclick = () => {
+  $("panel").classList.toggle("hidden");
+  $("toggle").textContent = $("panel").classList.contains("hidden") ? "▲ Réglages caméra" : "▼ Masquer";
+};
+$("fs").onclick = async () => {
+  try {
+    await document.documentElement.requestFullscreen();
+    if (screen.orientation && screen.orientation.lock) await screen.orientation.lock("landscape");
+  } catch (e) {}
+};
+// Écran noir : économise la batterie et évite que l'écran éclaire le tableau
+$("dim").onclick = () => {
+  dimmed = !dimmed;
+  $("stage").style.opacity = dimmed ? 0 : 1;
+  $("dim").textContent = dimmed ? "Afficher l'image" : "Écran noir";
+};
+connect();
+</script>
+</body>
+</html>
