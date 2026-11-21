@@ -13,10 +13,13 @@ import math
 import os
 import time
 
-from PySide6.QtCore import QByteArray, QMarginsF, QPointF, QRectF, QSizeF, Qt, QTimer, Signal
-from PySide6.QtGui import (QBrush, QColor, QImage, QPageSize, QPainter, QPainterPath, QPdfWriter, QPen,
-                           QPixmap, QPolygonF)
+from PySide6.QtCore import QBuffer, QByteArray, QIODevice, QMarginsF, QPointF, QRect, QRectF, QSizeF, Qt, QTimer, Signal
+from PySide6.QtGui import (QBrush, QColor, QFont, QFontMetricsF, QImage, QPageSize, QPainter, QPainterPath, QPdfWriter,
+                           QPen, QPixmap, QPolygonF)
 from PySide6.QtWidgets import QWidget
+
+from . import instruments as instr
+from .mindmap import draw_mindmap, mindmap_bounds
 
 BACKGROUNDS = ["blanc", "quadrillage", "seyes", "lignes", "ardoise", "noir"]
 BG_LABELS = {"blanc": "Blanc", "quadrillage": "Quadrillage", "seyes": "Seyès", "lignes": "Lignes",
@@ -25,6 +28,19 @@ PALETTE = ["#1e3a8a", "#111827", "#dc2626", "#16a34a", "#2563eb", "#f59e0b", "#9
 WIDTHS = {"fin": 3, "moyen": 6, "epais": 12}
 DEFAULT_INK = {"rouge": "#dc2626", "vert": "#16a34a", "bleu": "#2563eb"}
 SHAPES = ("line", "arrow", "rect", "ellipse")
+TEXT_FLAGS = int(Qt.AlignLeft | Qt.AlignTop | Qt.TextWordWrap)
+
+
+def text_font(size):
+    f = QFont("Segoe UI", 10)
+    f.setPixelSize(max(8, int(size)))
+    return f
+
+
+def text_rect(it):
+    fm = QFontMetricsF(text_font(it["s"]))
+    r = fm.boundingRect(QRectF(0, 0, it.get("wmax", 1400), 4000), TEXT_FLAGS, it["t"])
+    return QRectF(it["p"][0], it["p"][1], r.width(), r.height())
 
 
 class ToolState:
@@ -86,6 +102,18 @@ def draw_item(p, it):
     if k == "image":
         x, y, w, h = it["r"]
         p.drawImage(QRectF(x, y, w, h), item_image(it))
+        if it.get("credit"):                       # crédit obligatoire des images sous licence libre
+            p.setFont(text_font(11))
+            p.setPen(QColor(100, 116, 139))
+            p.drawText(QRectF(x, y + h + 2, max(w, 260), 16), Qt.AlignLeft | Qt.AlignTop, it["credit"])
+        return
+    if k == "text":
+        p.setFont(text_font(it["s"]))
+        p.setPen(QColor(it["c"]))
+        p.drawText(text_rect(it), TEXT_FLAGS, it["t"])
+        return
+    if k == "mindmap":
+        draw_mindmap(p, it)
         return
     col = QColor(it["c"])
     col.setAlpha(it.get("a", 255))
@@ -152,6 +180,10 @@ def hit(it, x, y, r):
     if k == "image":
         X, Y, W, H = it["r"]
         return X - r <= x <= X + W + r and Y - r <= y <= Y + H + r
+    if k == "text":
+        return text_rect(it).adjusted(-r, -r, r, r).contains(QPointF(x, y))
+    if k == "mindmap":
+        return mindmap_bounds(it).adjusted(-r, -r, r, r).contains(QPointF(x, y))
     rr = r + it["w"] / 2
     if k == "stroke":
         pts = it["pts"]
@@ -176,6 +208,8 @@ def translate(it, dx, dy):
     k = it["k"]
     if k == "image":
         it["r"] = [it["r"][0] + dx, it["r"][1] + dy, it["r"][2], it["r"][3]]
+    elif k in ("text", "mindmap"):
+        it["p"] = [it["p"][0] + dx, it["p"][1] + dy]
     elif k == "stroke":
         it["pts"] = [[x + dx, y + dy] for x, y in it["pts"]]
     else:
@@ -187,6 +221,8 @@ def clone(it):
     c = {k: (v.copy() if isinstance(v, list) else v) for k, v in it.items()}
     if "pts" in c:
         c["pts"] = [list(p) for p in it["pts"]]
+    if "_img" in it:
+        c["_img"] = it["_img"]
     return c
 
 
@@ -195,6 +231,7 @@ def clone(it):
 # ----------------------------------------------------------------------------
 class InkCanvas(QWidget):
     changed = Signal()          # contenu modifié (pour rafraîchir la barre d'outils)
+    text_requested = Signal(object, str)   # position (page), clé du stylet : saisir un texte
 
     def __init__(self, transparent=False, parent=None):
         super().__init__(parent)
@@ -205,6 +242,7 @@ class InkCanvas(QWidget):
         self.active = {}        # id pointeur → geste en cours
         self.frozen = None      # mode annotation : image de l'écran « figé »
         self.hovers = {}        # id pointeur → position (doigt visible sans appui)
+        self.instruments = []   # règle, équerre, rapporteur posés sur l'écran
         self._cache = None
         self._toast, self._toast_t = "", 0
         self.setAttribute(Qt.WA_OpaquePaintEvent, not transparent)
@@ -296,13 +334,60 @@ class InkCanvas(QWidget):
         return pos.x() / sx, pos.y() / sy
 
     # -------------------------------------------------------------- gestes
+    # -------------------------------------------------------------- instruments
+    def toggle_instrument(self, kind):
+        for ins in self.instruments:
+            if ins.kind == kind:
+                self.instruments.remove(ins)
+                self.update()
+                return
+        W, H = self.page["size"]
+        cls = instr.KINDS[kind]
+        if kind == "rapporteur":
+            ins = cls(W / 2, H * 0.62)
+        elif kind == "regle":
+            ins = cls(W / 2 - cls.L / 2, H * 0.55)
+        else:
+            ins = cls(W * 0.35, H * 0.3)
+        self.instruments.append(ins)
+        self.update()
+
     def pen_down(self, pid, key, pos):
         x, y = self.to_page(pos)
         ts = self.tool_for(key)
         g = {"tool": ts.tool, "key": key, "last": (x, y)}
+        for ins in reversed(self.instruments):        # les instruments sont au-dessus du dessin
+            part = ins.hit(x, y)
+            if part == "close":
+                self.instruments.remove(ins)
+                self.update()
+                return
+            if part == "rotate":
+                g.update(tool="ins_rotate", ins=ins, a0=ins.a - math.atan2(y - ins.y, x - ins.x))
+                self.active[pid] = g
+                return
+            if part == "body":
+                g.update(tool="ins_move", ins=ins)
+                self.active[pid] = g
+                return
+        if ts.tool == "text":
+            self.text_requested.emit((x, y), key)
+            return
+        if ts.tool == "compass":
+            g["center"] = (x, y)
+            g["radius"] = 0.0
+            self.active[pid] = g
+            self.update()
+            return
         if ts.tool in ("pen", "marker"):
             a = 90 if ts.tool == "marker" else 255
             w = ts.width * (3 if ts.tool == "marker" else 1)
+            for ins in self.instruments:              # tracé le long d'un bord : aimanté
+                edge = ins.snap_edge(x, y)
+                if edge:
+                    g["edge"], g["edge_off"] = edge, w / 2 + 1.5
+                    x, y = instr.project_on_line(x, y, edge, g["edge_off"])
+                    break
             g["item"] = {"k": "stroke", "c": ts.color, "w": w, "a": a, "pts": [[x, y]]}
         elif ts.tool in SHAPES:
             g["item"] = {"k": ts.tool, "c": ts.color, "w": ts.width, "p1": [x, y], "p2": [x, y]}
@@ -332,7 +417,30 @@ class InkCanvas(QWidget):
         x, y = self.to_page(pos)
         lx, ly = g["last"]
         tool = g["tool"]
-        if tool in ("pen", "marker"):
+        if tool == "ins_move":
+            g["ins"].x += x - lx
+            g["ins"].y += y - ly
+        elif tool == "ins_rotate":
+            ins = g["ins"]
+            a = g["a0"] + math.atan2(y - ins.y, x - ins.x)
+            step = math.radians(15)
+            if abs(a - round(a / step) * step) < math.radians(3):   # aimantation tous les 15°
+                a = round(a / step) * step
+            ins.a = a
+        elif tool == "compass":
+            cx, cy = g["center"]
+            g["radius"] = math.hypot(x - cx, y - cy)
+        elif tool in ("pen", "marker"):
+            if "edge" in g:
+                x, y = instr.project_on_line(x, y, g["edge"], g["edge_off"])
+                pts = g["item"]["pts"]
+                if len(pts) > 1:
+                    pts[-1] = [x, y]                  # trait droit : on garde les deux extrémités
+                else:
+                    pts.append([x, y])
+                g["last"] = (x, y)
+                self.update()
+                return
             if math.hypot(x - lx, y - ly) < 1.5:
                 return
             g["item"]["pts"].append([x, y])
@@ -353,6 +461,10 @@ class InkCanvas(QWidget):
         g = self.active.pop(pid, None)
         if not g:
             return
+        if g["tool"] == "compass" and g["radius"] > 4:
+            ts = self.tool_for(g["key"])
+            (cx, cy), r = g["center"], g["radius"]
+            g["item"] = {"k": "ellipse", "c": ts.color, "w": ts.width, "p1": [cx - r, cy - r], "p2": [cx + r, cy + r]}
         if "item" in g:
             self._snapshot()
             self.page["items"].append(g["item"])
@@ -392,7 +504,38 @@ class InkCanvas(QWidget):
         if e.button() == Qt.LeftButton:
             self.pen_up(0)
 
+    def add_text(self, pos, text, key):
+        if not text.strip():
+            return
+        ts = self.tool_for(key)
+        size = {3: 28, 6: 40, 12: 60}.get(ts.width, 36)
+        self._snapshot()
+        self.page["items"].append({"k": "text", "t": text, "p": [pos[0], pos[1]], "c": ts.color, "s": size})
+        self.invalidate()
+
+    def add_item(self, it):
+        self._snapshot()
+        self.page["items"].append(it)
+        self.invalidate()
+
     # -------------------------------------------------------------- images
+    def insert_qimage(self, img, credit="", max_frac=0.4):
+        """Insère une image (pictogramme, image en ligne…) au centre de la page."""
+        if img is None or img.isNull():
+            return
+        buf = QBuffer()
+        buf.open(QIODevice.WriteOnly)
+        img.save(buf, "PNG")
+        W, H = self.page["size"]
+        s = min(W * max_frac / img.width(), H * max_frac / img.height(), 1.5)
+        w, h = img.width() * s, img.height() * s
+        n = len(self.page["items"]) % 6               # décalage : les insertions successives ne se superposent pas
+        it = {"k": "image", "data": base64.b64encode(bytes(buf.data())).decode(),
+              "r": [(W - w) / 2 + n * 24, (H - h) / 2 + n * 24, w, h], "_img": img}
+        if credit:
+            it["credit"] = credit
+        self.add_item(it)
+
     def insert_image(self, path):
         with open(path, "rb") as f:
             data = f.read()
@@ -455,10 +598,34 @@ class InkCanvas(QWidget):
         sx, sy = self._scale()
         p.save()
         p.scale(sx, sy)
+        for ins in self.instruments:
+            ins.paint(p)
         for g in self.active.values():
+            if g["tool"] == "compass":
+                (cx, cy), r = g["center"], g["radius"]
+                ts = self.tool_for(g["key"])
+                p.setPen(QPen(QColor(ts.color), max(1, ts.width / 2), Qt.DashLine))
+                p.setBrush(Qt.NoBrush)
+                p.drawEllipse(QPointF(cx, cy), r, r)
+                ang = math.atan2(g["last"][1] - cy, g["last"][0] - cx)
+                ex, ey = cx + r * math.cos(ang), cy + r * math.sin(ang)
+                p.setPen(QPen(QColor(71, 85, 105), 3))
+                p.drawLine(QPointF(cx, cy), QPointF(ex, ey))   # branche du compas
+                p.setBrush(QColor(71, 85, 105))
+                p.drawEllipse(QPointF(cx, cy), 5, 5)
+                p.setFont(text_font(18))
+                p.setPen(QColor(15, 23, 42))
+                p.drawText(QPointF((cx + ex) / 2 + 10, (cy + ey) / 2 - 10), f"r = {r / instr.PX_PER_CM:.1f} cm")
+                continue
+            if g["tool"] == "ins_rotate":
+                ins = g["ins"]
+                p.setFont(text_font(18))
+                p.setPen(QColor(3, 105, 161))
+                p.drawText(QPointF(ins.x + 12, ins.y - 14), f"{math.degrees(ins.a) % 360:.0f}°")
+                continue
             if "item" in g:
                 draw_item(p, g["item"])
-            elif g["tool"] == "eraser":
+            elif g["tool"] == "eraser" and "last" in g:
                 ts = self.tool_for(g["key"])
                 r = max(10, ts.width * 2.5)
                 p.setPen(QPen(QColor(120, 120, 120, 200), 2, Qt.DashLine))

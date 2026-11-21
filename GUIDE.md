@@ -147,16 +147,42 @@ Les réglages et le calibrage sont enregistrés : au prochain lancement, tout es
 | 🖱️ 🖊️ 📋 ⚙️ | Mode souris / annoter / tableau / panneau de contrôle |
 | ✏️ 🖍️ 🧽 ✋ | Stylo, surligneur, gomme (efface les traits touchés), déplacer un élément |
 | ╱ ➚ ▭ ◯ | Ligne, flèche, rectangle, ellipse |
+| 🔤 🧭 | Texte, compas |
+| 📏 📐 ◠ 🖼️ ⏱️ ☁️ 🧠 | Règle, équerre, rapporteur, bibliothèque d'images, minuteur, nuage de mots, carte mentale |
 | Couleurs, • ● ⬤ | Couleur et épaisseur **du stylet qui touche la barre** |
 | ↶ ↷ 🗑️ | Annuler, rétablir, effacer la page |
 | ▦ | Changer le fond : blanc → quadrillage → Seyès → lignes → ardoise → noir |
 | ◀ ▶ ➕ ❌ | Pages : précédente, suivante (en crée une à la fin), nouvelle, supprimer |
-| 🖼️ 💾 📂 📄 | Insérer une image, enregistrer, ouvrir, exporter en PDF |
+| 💾 📂 📄 | Enregistrer, ouvrir, exporter en PDF |
 | ❄️ 📸 | (Annoter) Figer l'écran pour écrire dessus / capture d'écran |
 | ✖ | Revenir au mode souris |
 
 Les fichiers sont enregistrés dans **Documents\TBI Pro** : tableaux `.tbi` (réouvrables), PDF, et captures dans le sous-dossier `Captures`.
 Au clavier : **Échap** revient au mode souris ; flèches ←/→ pour changer de page ; Ctrl+Z / Ctrl+Y pour annuler / rétablir.
+
+### Outils de classe
+
+| Bouton | Outil |
+|---|---|
+| 🔤 | **Texte** : touchez la page, puis écrivez avec le clavier virtuel (ou le clavier du PC). La taille suit l'épaisseur choisie. |
+| 🧭 | **Compas** : appuyez au centre, glissez pour ouvrir le compas (le rayon s'affiche en cm), relâchez pour tracer le cercle. |
+| 📏 📐 ◠ | **Règle, équerre, rapporteur** : un toucher les pose ou les retire. Glisser à l'intérieur pour les déplacer, poignée ⟳ pour les faire tourner (aimantation tous les 15°, angle affiché), × pour les retirer. **Tracez au stylo le long d'un bord** : le trait devient parfaitement droit. |
+| 🖼️ | **Bibliothèque d'images** (voir ci-dessous) |
+| ⏱️ | **Minuteur / chronomètre** : −1 / +1 / +5 minutes, ⏯️ démarrer/pause, ⟲ remise à zéro, ⏱️ changer de mode. Les 10 dernières secondes s'affichent en rouge, avec un signal sonore à la fin. |
+| ☁️ | **Nuage de mots** : les élèves scannent le QR code affiché avec leur téléphone (même Wi-Fi), et leurs mots apparaissent en direct. Plus un mot est proposé, plus il est grand. Vous pouvez poser la question, ajouter des mots, fermer les réponses, puis **insérer le nuage dans le tableau**. |
+| 🧠 | **Carte mentale** : écrivez un plan (1re ligne = idée centrale, une branche par ligne, « ⇥ Sous-idée » pour une sous-branche). L'aperçu se met à jour en direct, puis la carte est insérée dans le tableau, où elle se déplace avec ✋. |
+
+### Bibliothèque d'images
+
+- **Pictogrammes (hors ligne)** : plusieurs centaines de pictogrammes couleur classés par thèmes (école, animaux, nature, météo, aliments, corps et émotions, métiers, transports et lieux, sports et arts, sciences et symboles).
+- **Banques libres en ligne** (le PC doit être connecté à Internet). Choisissez une banque, puis une **catégorie** (école, animaux, corps, émotions, aliments, nature, météo, transports, métiers, maison, sport, musique, sciences, géographie, histoire, famille, vêtements, lecture) ou tapez un mot :
+  - **ARASAAC** : pictogrammes éducatifs, recherche en français (licence CC BY-NC-SA, usage non commercial) ;
+  - **Icônes couleur** : OpenMoji, Noto, Twemoji, Fluent (recherche plutôt en anglais) ;
+  - **Openverse** : illustrations et photos sous licence Creative Commons ou domaine public ;
+  - **Wikimedia Commons** : photos, cartes, documents historiques.
+- **Mes ressources** : toutes les images déposées dans `Documents\TBI Pro\Ressources` (sous-dossiers compris), plus « Autre fichier… ».
+
+Touchez une vignette : l'image est insérée au centre de la page. Déplacez-la ensuite avec l'outil ✋. Quand la licence l'exige, le **crédit de l'auteur** est ajouté automatiquement sous l'image.
 
 ---
 
@@ -183,6 +209,8 @@ Au clavier : **Échap** revient au mode souris ; flèches ←/→ pour changer d
 | Décalage entre stylet et trait | Recalibrez. Vérifiez que l'écran choisi est bien le projecteur. |
 | Le calibrage auto échoue | La caméra doit voir toute la projection. Sinon, calibrez au stylet. |
 | Mode doigt : rien ne se passe | Vérifiez que la main est bien éclairée et visible (cercle jaune dans la vue caméra). Remontez l'exposition sur le portable. Au premier usage depuis le code source, le PC doit être connecté à Internet pour télécharger le modèle. |
+| Nuage de mots : les élèves n'accèdent pas à la page | Ils doivent être sur le même Wi-Fi que le PC, et le pare-feu Windows doit autoriser TBI Pro sur les réseaux privés. |
+| Banques en ligne : « Connexion impossible » | Vérifiez Internet sur le PC. Le réseau de l'établissement bloque peut-être certains sites : essayez une autre banque. |
 | Mode doigt : clics involontaires | Passez à « Garder le doigt immobile 1 s », ou pincez plus franchement. |
 | Deux stylets de même couleur se mélangent | Utilisez des LED de couleurs différentes, ou espacez les élèves. |
 | Caméra IR : taches parasites | « Réapprendre le fond infrarouge », fermez les rideaux côté soleil, montez le seuil. |

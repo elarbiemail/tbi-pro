@@ -19,7 +19,8 @@ QLabel { color: #cbd5e1; font: 600 12px "Segoe UI",sans-serif; }
 """
 
 TOOLS = [("pen", "✏️", "Stylo"), ("marker", "🖍️", "Surligneur"), ("eraser", "🧽", "Gomme"), ("move", "✋", "Déplacer"),
-         ("line", "╱", "Ligne"), ("arrow", "➚", "Flèche"), ("rect", "▭", "Rectangle"), ("ellipse", "◯", "Ellipse")]
+         ("line", "╱", "Ligne"), ("arrow", "➚", "Flèche"), ("rect", "▭", "Rectangle"), ("ellipse", "◯", "Ellipse"),
+         ("text", "🔤", "Texte (clavier virtuel)"), ("compass", "🧭", "Compas : appuyer au centre, glisser pour le rayon")]
 
 
 class Toolbar(QFrame):
@@ -81,6 +82,15 @@ class Toolbar(QFrame):
         sections.append(colors)
         edit = [B("↶", "Annuler", self._do(self.canvas.undo)), B("↷", "Rétablir", self._do(self.canvas.redo)),
                 B("🗑️", "Effacer la page", self._do(self.canvas.clear_page))]
+        sections.append([B("📏", "Règle (glisser pour déplacer, ⟳ pour tourner, tracer le long du bord)",
+                           self._do(lambda: self.canvas.toggle_instrument("regle"))),
+                         B("📐", "Équerre", self._do(lambda: self.canvas.toggle_instrument("equerre"))),
+                         B("◠", "Rapporteur", self._do(lambda: self.canvas.toggle_instrument("rapporteur"))),
+                         B("🖼️", "Bibliothèque d'images (pictogrammes, banques libres en ligne, mes ressources)",
+                           lambda: self.action.emit("library")),
+                         B("⏱️", "Chronomètre / minuteur", lambda: self.action.emit("timer")),
+                         B("☁️", "Nuage de mots (les élèves participent par QR code)", lambda: self.action.emit("cloud")),
+                         B("🧠", "Carte mentale", lambda: self.action.emit("mindmap"))])
         if kind == "board":
             edit.append(B("▦", "Changer le fond", self._do(self.canvas.cycle_background)))
             sections.append(edit)
@@ -91,8 +101,7 @@ class Toolbar(QFrame):
                              B("➕", "Nouvelle page", self._do(self.canvas.add_page)),
                              B("❌", "Supprimer la page", self._do(self.canvas.delete_page)),
                              self.page_lbl])
-            sections.append([B("🖼️", "Insérer une image", lambda: self.action.emit("image")),
-                             B("💾", "Enregistrer (Documents/TBI Pro)", lambda: self.action.emit("save")),
+            sections.append([B("💾", "Enregistrer (Documents/TBI Pro)", lambda: self.action.emit("save")),
                              B("📂", "Ouvrir un tableau", lambda: self.action.emit("open")),
                              B("📄", "Exporter en PDF", lambda: self.action.emit("pdf"))])
         else:

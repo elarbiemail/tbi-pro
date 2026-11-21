@@ -11,8 +11,44 @@ from PySide6.QtWidgets import QApplication, QFileDialog, QPushButton, QVBoxLayou
 
 from ..config import documents_dir
 from .. import vision
+from .activities import MindmapDialog, TimerPanel, WordCloudDialog
 from .canvas import InkCanvas
+from .keyboard import TextDialog
+from .library import LibraryDialog
 from .toolbar import Toolbar
+
+
+class ToolsMixin:
+    """Actions communes au tableau et à l'annotation : bibliothèque, minuteur, nuage, carte, texte."""
+
+    def _setup_tools(self):
+        self.timer_panel = TimerPanel(self)
+        self.canvas.text_requested.connect(
+            lambda pos, key: QTimer.singleShot(0, lambda: self._ask_text(pos, key)))
+
+    def _scr(self):
+        return self.screen_ref or self.screen()
+
+    def _ask_text(self, pos, key):
+        d = TextDialog("Écrire un texte", "", self, self._scr())
+        if d.exec():
+            self.canvas.add_text(pos, d.text(), key)
+        self.raise_()
+
+    def common_action(self, act):
+        if act == "library":
+            LibraryDialog(self.canvas, self, self._scr()).exec()
+        elif act == "timer":
+            self.timer_panel.toggle_visible()
+        elif act == "cloud":
+            WordCloudDialog(self.canvas, self, self._scr()).exec()
+        elif act == "mindmap":
+            MindmapDialog(self.canvas, self, self._scr()).exec()
+        else:
+            return False
+        self.toolbar.refresh()
+        self.raise_()
+        return True
 
 
 def stamp():
@@ -36,7 +72,7 @@ class ProjectedWindow(QWidget):
 
 
 # ----------------------------------------------------------------------------
-class BoardWindow(ProjectedWindow):
+class BoardWindow(ToolsMixin, ProjectedWindow):
     mode_requested = Signal(str)
     panel_requested = Signal()
 
@@ -49,6 +85,7 @@ class BoardWindow(ProjectedWindow):
         self.toolbar.panel_requested.connect(self.panel_requested)
         self.toolbar.action.connect(self.on_action)
         self.autosave_path = None
+        self._setup_tools()
 
     def resizeEvent(self, e):
         self.canvas.setGeometry(self.rect())
@@ -73,6 +110,8 @@ class BoardWindow(ProjectedWindow):
 
     def on_action(self, act):
         c = self.canvas
+        if self.common_action(act):
+            return
         if act == "save":
             if not self.autosave_path:
                 self.autosave_path = os.path.join(documents_dir(), f"Tableau_{stamp()}.tbi")
@@ -99,7 +138,7 @@ class BoardWindow(ProjectedWindow):
 
 
 # ----------------------------------------------------------------------------
-class OverlayWindow(ProjectedWindow):
+class OverlayWindow(ToolsMixin, ProjectedWindow):
     """Calque transparent pour écrire par-dessus n'importe quel logiciel."""
     mode_requested = Signal(str)
     panel_requested = Signal()
@@ -113,6 +152,7 @@ class OverlayWindow(ProjectedWindow):
         self.toolbar.mode_requested.connect(self.mode_requested)
         self.toolbar.panel_requested.connect(self.panel_requested)
         self.toolbar.action.connect(self.on_action)
+        self._setup_tools()
 
     def resizeEvent(self, e):
         self.canvas.setGeometry(self.rect())
@@ -142,6 +182,8 @@ class OverlayWindow(ProjectedWindow):
 
     def on_action(self, act):
         c = self.canvas
+        if self.common_action(act):
+            return
         if act == "freeze":
             if c.frozen is None:
                 c.frozen = self._grab_screen(hide_all=True)
