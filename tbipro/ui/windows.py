@@ -236,9 +236,9 @@ class CalibWindow(ProjectedWindow):
     finished = Signal(object, object)
     failed = Signal(str)
 
-    def __init__(self, source, mode):
+    def __init__(self, source, mode, finger=False):
         super().__init__(Qt.Window | Qt.WindowStaysOnTopHint)
-        self.source, self.mode = source, mode
+        self.source, self.mode, self.finger = source, mode, finger
         self.targets, self.i, self.samples, self.last_seen = [], 0, [], 0
         self.cam_pts = []
         self.fill = QColor("black")
@@ -253,6 +253,8 @@ class CalibWindow(ProjectedWindow):
         if self.mode == "auto":
             self.auto_step, self.auto_t = 0, time.time()
             self.message = "Calibrage automatique… ne bougez pas la caméra"
+        elif self.finger:
+            self.message = "Placez l'index au centre de la cible jaune et pincez (pouce + index)"
         else:
             self.message = "Appuyez le stylet au centre de la cible jaune"
         self.timer.start()
@@ -268,6 +270,7 @@ class CalibWindow(ProjectedWindow):
     def feed(self, blobs):
         if self.mode != "pen" or self.i >= 4:
             return
+        blobs = [b for b in blobs if len(b) < 5 or b[4]]   # doigt : seulement quand on pince
         now = time.time()
         if blobs:
             self.samples.append(blobs[0][:2])
@@ -349,6 +352,6 @@ class CalibWindow(ProjectedWindow):
         p.setFont(f)
         txt = "Échap = annuler"
         if self.samples:
-            txt = "Maintenez…" if len(self.samples) < 10 else "Relâchez le stylet"
+            txt = "Maintenez…" if len(self.samples) < 10 else ("Relâchez" if self.finger else "Relâchez le stylet")
             p.setPen(QColor(0, 150, 0))
         p.drawText(QRectF(0, self.height() / 2, self.width(), 40), Qt.AlignCenter, txt)

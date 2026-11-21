@@ -44,6 +44,7 @@ class Controller(QObject):
         self.mouse_pid = None
         self.dwell = None          # mode laser : (x, y, t0, déjà cliqué)
         self.ptr_target = {}       # id pointeur → ("canvas", canvas) | ("btn", bouton, clé) | ("os",)
+        self.finger_dwell = {}     # doigt « maintien » : id → [x, y, t0, cliqué]
 
         self.panel = ControlPanel(self.cfg, self.screens)
         self.board = BoardWindow()
@@ -113,7 +114,7 @@ class Controller(QObject):
         self.set_mode("souris")
         self.floater.hide()
         self.source.set_params(roi=None)
-        self.calib = CalibWindow(self.source, mode)
+        self.calib = CalibWindow(self.source, mode, finger=self.cfg.get("pointer") == "doigt")
         self.calib.finished.connect(self._calib_ok)
         self.calib.failed.connect(self._calib_fail)
         self.calib.start(self.screen)
@@ -150,7 +151,7 @@ class Controller(QObject):
     def apply_params(self):
         c = self.cfg
         self.source.set_params(threshold=c["threshold"], min_area=c["min_area"], max_area=c["max_area"],
-                               roi=None if self.calib else c.get("roi"))
+                               roi=None if self.calib else c.get("roi"), mode=c.get("pointer", "led"))
         self.save_timer.start()
 
     def relearn_ir(self):
@@ -174,14 +175,38 @@ class Controller(QObject):
                 return
             g = self.screen.geometry()
             W, Hh = g.width(), g.height()
+            dwell = self.cfg.get("pointer") == "doigt" and self.cfg.get("finger_click") == "maintien"
             pts = []
             for b in blobs:
                 x, y = vision.apply_h(self.H, b[0], b[1])
                 if -30 <= x <= W + 30 and -30 <= y <= Hh + 30:
-                    pts.append((min(max(x, 0), W - 1), min(max(y, 0), Hh - 1), b[3]))
-            self.dispatch(self.tracker.update(pts))
+                    pressed = False if dwell else (bool(b[4]) if len(b) > 4 else True)
+                    pts.append((min(max(x, 0), W - 1), min(max(y, 0), Hh - 1), b[3], pressed))
+            events = self.tracker.update(pts)
+            if dwell:
+                events = self._dwell_clicks(events)
+            self.dispatch(events)
         except Exception:
             traceback.print_exc()
+
+    def _dwell_clicks(self, events):
+        """Doigt immobile pendant ~1 s → clic (appui + relâchement) à cet endroit."""
+        out = []
+        delay = float(self.cfg.get("dwell_seconds", 1.0))
+        now = time.time()
+        for ev in events:
+            kind, pid, key, x, y = ev
+            out.append(ev)
+            if kind == "hover":
+                d = self.finger_dwell.get(pid)
+                if d is None or np.hypot(x - d[0], y - d[1]) > 22:
+                    self.finger_dwell[pid] = [x, y, now, False]
+                elif not d[3] and now - d[2] >= delay:
+                    d[3] = True
+                    out += [("down", pid, key, d[0], d[1]), ("up", pid, key, d[0], d[1])]
+            elif kind == "leave":
+                self.finger_dwell.pop(pid, None)
+        return out
 
     # ------------------------------------------------------------------ distribution des événements
     def dispatch(self, events):
@@ -193,9 +218,15 @@ class Controller(QObject):
                 self._to_window(kind, pid, key, x, y)
 
     def _to_mouse(self, kind, pid, x, y):
-        if self.mouse_pid is None and kind == "down":
+        if self.mouse_pid is None and kind in ("down", "hover"):
             self.mouse_pid = pid
         if pid != self.mouse_pid:
+            return
+        if kind == "hover":                      # doigt sans appui : le curseur suit l'index
+            self.mouse.move(self.screen, x, y)
+            return
+        if kind == "leave":
+            self.mouse_pid, self.dwell = None, None
             return
         laser = bool(self.cfg.get("laser"))
         if kind in ("down", "move"):
@@ -209,10 +240,12 @@ class Controller(QObject):
                 elif not self.dwell[3] and now - self.dwell[2] >= float(self.cfg.get("dwell_seconds", 1.0)):
                     self.mouse.click()
                     self.dwell[3] = True
-        else:
+        else:  # up
             if not laser:
                 self.mouse.release()
-            self.mouse_pid, self.dwell = None, None
+            if self.cfg.get("pointer") != "doigt":   # le doigt reste visible : on garde le même pointeur
+                self.mouse_pid = None
+            self.dwell = None
 
     def _active_window(self):
         return self.board if self.mode == "tableau" else self.overlay
@@ -220,7 +253,15 @@ class Controller(QObject):
     def _to_window(self, kind, pid, key, x, y):
         g = self.screen.geometry()
         gpos = QPoint(int(g.x() + x), int(g.y() + y))
+        cv = self._active_window().canvas
+        if kind == "hover":
+            cv.set_hover(pid, QPointF(cv.mapFromGlobal(QPointF(gpos))))
+            return
+        if kind == "leave":
+            cv.set_hover(pid, None)
+            return
         if kind == "down":
+            cv.set_hover(pid, None)
             if QApplication.activeModalWidget() is not None:          # boîte de dialogue ouverte
                 self.ptr_target[pid] = ("os",)
                 self.mouse.move(self.screen, x, y)
@@ -270,6 +311,8 @@ class Controller(QObject):
         self.mouse.release()
         self.ptr_target.clear()
         self.mouse_pid = None
+        for w in (self.board, self.overlay):
+            w.canvas.hovers.clear()
         self.mode = mode
         if mode == "souris":
             self.board.hide()

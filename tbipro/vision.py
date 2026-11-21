@@ -7,6 +7,7 @@ Toutes les positions caméra sont NORMALISÉES (0-1) : le calibrage reste valabl
 même si la résolution de la caméra change.
 """
 import math
+import time
 
 import numpy as np
 
@@ -154,17 +155,20 @@ def find_projection_quad(dark, light):
 # Suivi multi-stylets
 # ----------------------------------------------------------------------------
 class Track:
-    __slots__ = ("id", "key", "x", "y", "seen", "lost", "down")
+    __slots__ = ("id", "key", "x", "y", "seen", "lost", "down", "pressed", "unpressed")
 
-    def __init__(self, tid, key, x, y):
+    def __init__(self, tid, key, x, y, pressed=True):
         self.id, self.key, self.x, self.y = tid, key, x, y
         self.seen, self.lost, self.down = 1, 0, False
+        self.pressed, self.unpressed = pressed, 0
 
 
 class PenTracker:
     """
     Associe les points détectés d'une image à l'autre et produit des événements :
       ("down", id, clé, x, y)  ("move", id, clé, x, y)  ("up", id, clé, x, y)
+      ("hover", id, clé, x, y) : pointeur visible mais pas « appuyé » (doigt sans pincement)
+      ("leave", id, clé, x, y) : pointeur disparu
     La clé identifie le stylet (sa couleur si l'option est active, sinon "stylet").
     """
 
@@ -177,20 +181,20 @@ class PenTracker:
         return color if self.cfg.get("color_pens") else "stylet"
 
     def release_all(self):
-        ev = [("up", t.id, t.key, t.x, t.y) for t in self.tracks if t.down]
+        ev = [("up" if t.down else "leave", t.id, t.key, t.x, t.y) for t in self.tracks]
         self.tracks = []
         return ev
 
     def update(self, points, max_dist=140.0):
-        """points : liste de (x, y, couleur) en pixels écran. Renvoie la liste d'événements."""
+        """points : liste de (x, y, couleur[, appuyé]) en pixels écran. Renvoie la liste d'événements."""
         c = self.cfg
         a = float(c.get("smoothing", 0.45))
         events = []
-        pts = list(points)[: int(c.get("max_pens", 4)) + 2]
+        pts = [(p[0], p[1], p[2], bool(p[3]) if len(p) > 3 else True) for p in points][: int(c.get("max_pens", 4)) + 2]
         # appariement glouton par distance croissante (même couleur obligatoire si option active)
         pairs = []
         for ti, t in enumerate(self.tracks):
-            for pi, (x, y, col) in enumerate(pts):
+            for pi, (x, y, col, _) in enumerate(pts):
                 d = math.hypot(t.x - x, t.y - y)
                 if c.get("color_pens") and t.key != self.key_of(col):
                     d += 80.0  # couleur différente : possible (reflet), mais pénalisé
@@ -204,32 +208,44 @@ class PenTracker:
             used_t.add(ti)
             used_p.add(pi)
             t = self.tracks[ti]
-            x, y, _ = pts[pi]
+            x, y, _, pr = pts[pi]
             t.x, t.y = a * t.x + (1 - a) * x, a * t.y + (1 - a) * y
             t.seen += 1
             t.lost = 0
+            t.pressed = pr
         survivors = []
         for ti, t in enumerate(self.tracks):
             if ti not in used_t:
                 t.lost += 1
                 if t.lost >= int(c.get("off_frames", 3)):
-                    if t.down:
-                        events.append(("up", t.id, t.key, t.x, t.y))
+                    events.append(("up" if t.down else "leave", t.id, t.key, t.x, t.y))
                     continue
             survivors.append(t)
         self.tracks = survivors
-        for pi, (x, y, col) in enumerate(pts):
+        for pi, (x, y, col, pr) in enumerate(pts):
             if pi not in used_p and len(self.tracks) < int(c.get("max_pens", 4)):
-                self.tracks.append(Track(self.next_id, self.key_of(col), x, y))
+                self.tracks.append(Track(self.next_id, self.key_of(col), x, y, pr))
                 self.next_id += 1
+        off = int(c.get("off_frames", 3))
         for t in self.tracks:
             if t.lost:
                 continue
-            if not t.down and t.seen >= int(c.get("on_frames", 2)):
-                t.down = True
-                events.append(("down", t.id, t.key, t.x, t.y))
-            elif t.down:
+            if not t.down:
+                if t.pressed and t.seen >= int(c.get("on_frames", 2)):
+                    t.down, t.unpressed = True, 0
+                    events.append(("down", t.id, t.key, t.x, t.y))
+                else:
+                    events.append(("hover", t.id, t.key, t.x, t.y))
+            elif t.pressed:
+                t.unpressed = 0
                 events.append(("move", t.id, t.key, t.x, t.y))
+            else:
+                t.unpressed += 1
+                if t.unpressed >= off:
+                    t.down = False
+                    events.append(("up", t.id, t.key, t.x, t.y))
+                else:
+                    events.append(("move", t.id, t.key, t.x, t.y))
         return events
 
 
@@ -287,3 +303,72 @@ def detect_blobs_ir(frame, background=None, threshold=200, min_area=2, max_area=
         background.learn(gray)   # aucun stylet : le fond peut être appris
     out.sort(key=lambda t: -t[2])
     return out[:max_blobs]
+
+
+
+# ----------------------------------------------------------------------------
+# Doigt : l'index de la main sert de pointeur (MediaPipe Hand Landmarker)
+# ----------------------------------------------------------------------------
+PINCH_ON, PINCH_OFF = 0.30, 0.42   # hystérésis : pouce-index rapprochés = appui
+
+
+def pinch_ratio(lm):
+    """Distance pouce-index rapportée à la taille de la main (poignet → base du majeur)."""
+    def d(a, b):
+        return math.hypot(lm[a][0] - lm[b][0], lm[a][1] - lm[b][1])
+    return d(4, 8) / max(d(0, 9), 1e-6)
+
+
+class PinchState:
+    def __init__(self):
+        self.pressed = False
+
+    def update(self, ratio):
+        if self.pressed and ratio > PINCH_OFF:
+            self.pressed = False
+        elif not self.pressed and ratio < PINCH_ON:
+            self.pressed = True
+        return self.pressed
+
+
+class HandDetector:
+    """Détection de la main sur le PC (sources webcam) avec le paquet Python mediapipe."""
+
+    def __init__(self, model_path, max_hands=2):
+        from mediapipe.tasks.python import BaseOptions, vision as mpv
+        import mediapipe as mp
+        self.mp = mp
+        opts = mpv.HandLandmarkerOptions(base_options=BaseOptions(model_asset_path=model_path),
+                                         running_mode=mpv.RunningMode.VIDEO, num_hands=max_hands,
+                                         min_hand_detection_confidence=0.5, min_tracking_confidence=0.5)
+        self.lm = mpv.HandLandmarker.create_from_options(opts)
+        self.pinch = {}
+        self.t0 = time.time()
+        self.last_ts = -1
+
+    def detect(self, frame_bgr, roi=None):
+        """→ liste de (x, y, 0, "doigt", appuyé) normalisés (bout de l'index)."""
+        rgb = np.ascontiguousarray(frame_bgr[:, :, ::-1])
+        ts = int((time.time() - self.t0) * 1000)
+        if ts <= self.last_ts:
+            ts = self.last_ts + 1
+        self.last_ts = ts
+        res = self.lm.detect_for_video(self.mp.Image(image_format=self.mp.ImageFormat.SRGB, data=rgb), ts)
+        out = []
+        poly = expand_poly(roi, 0.08) if roi else None
+        for i, hand in enumerate(res.hand_landmarks or []):
+            lm = [(p.x, p.y) for p in hand]
+            label = res.handedness[i][0].category_name if res.handedness else str(i)
+            st = self.pinch.setdefault(label, PinchState())
+            pressed = st.update(pinch_ratio(lm))
+            x, y = lm[8]
+            if poly and not point_in_poly(x, y, poly):
+                continue
+            out.append((x, y, 0, "doigt", pressed))
+        return out
+
+    def close(self):
+        try:
+            self.lm.close()
+        except Exception:
+            pass

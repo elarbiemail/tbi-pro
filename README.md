@@ -6,6 +6,7 @@ Tableau blanc interactif à faible coût : un vidéoprojecteur, un PC Windows, u
 - **Annoter** : écriture par-dessus n'importe quel logiciel.
 - **Tableau** : tableau blanc multi-pages (Seyès, quadrillage…), export PDF.
 - **Multi-stylets** reconnus par la couleur de leur LED.
+- **Doigt** : le pointeur suit l'index de la main ; pincer pouce + index = clic.
 
 **Télécharger** : onglet *Actions* → dernière exécution → *Artifacts* → `TBI-Pro-Windows`, ou la page *Releases*.
 

@@ -9,7 +9,8 @@ from PySide6.QtWidgets import (QCheckBox, QComboBox, QFormLayout, QFrame, QGridL
 from ..config import APP_NAME, VERSION
 from ..sources import SOURCES
 
-PEN_COLORS = {"blanc": "#ffffff", "rouge": "#f87171", "vert": "#4ade80", "bleu": "#60a5fa", "ir": "#f0abfc"}
+PEN_COLORS = {"blanc": "#ffffff", "rouge": "#f87171", "vert": "#4ade80", "bleu": "#60a5fa", "ir": "#f0abfc",
+              "doigt": "#facc15"}
 
 CSS = """
 QMainWindow, QWidget { background:#0f172a; color:#e2e8f0; font: 10pt "Segoe UI"; }
@@ -71,7 +72,7 @@ class ControlPanel(QMainWindow):
         self.cfg = cfg
         self.setWindowTitle(f"{APP_NAME} {VERSION} — Panneau de contrôle")
         self.setStyleSheet(CSS)
-        self.resize(980, 680)
+        self.resize(1000, 790)
         root = QWidget()
         self.setCentralWidget(root)
         lay = QHBoxLayout(root)
@@ -132,7 +133,26 @@ class ControlPanel(QMainWindow):
         f.addWidget(self.calib_lbl)
         left.addWidget(g)
 
-        g = QGroupBox("3. Mode")
+        g = QGroupBox("3. Pointeur")
+        f = QFormLayout(g)
+        self.ptr_combo = QComboBox()
+        self.ptr_combo.addItem("✏️ Stylet à LED", "led")
+        self.ptr_combo.addItem("☝️ Doigt (le pointeur suit l'index)", "doigt")
+        self.ptr_combo.setCurrentIndex(max(0, self.ptr_combo.findData(cfg.get("pointer", "led"))))
+        f.addRow("Pointer avec", self.ptr_combo)
+        self.click_combo = QComboBox()
+        self.click_combo.addItem("Pincer le pouce et l'index", "pincer")
+        self.click_combo.addItem("Garder le doigt immobile 1 s", "maintien")
+        self.click_combo.setCurrentIndex(max(0, self.click_combo.findData(cfg.get("finger_click", "pincer"))))
+        f.addRow("Clic avec le doigt", self.click_combo)
+        self.ptr_hint = QLabel("Mode doigt : caméra en exposition normale. Pincer = clic maintenu (écrire, glisser) ; "
+                               "« immobile 1 s » = simple clic (souris, boutons). Non disponible avec la caméra infrarouge.")
+        self.ptr_hint.setObjectName("hint")
+        self.ptr_hint.setWordWrap(True)
+        f.addRow(self.ptr_hint)
+        left.addWidget(g)
+
+        g = QGroupBox("4. Mode")
         f = QGridLayout(g)
         self.mode_btns = {}
         for i, (m, txt) in enumerate([("souris", "🖱️ Souris"), ("annoter", "🖊️ Annoter"), ("tableau", "📋 Tableau")]):
@@ -192,7 +212,10 @@ class ControlPanel(QMainWindow):
         self.color_chk.toggled.connect(self._on_params)
         self.pens_spin.valueChanged.connect(self._on_params)
         self.laser_chk.toggled.connect(self._on_params)
+        self.ptr_combo.currentIndexChanged.connect(self._on_params)
+        self.click_combo.currentIndexChanged.connect(self._on_params)
         self._sync_src_widgets()
+        self._sync_ptr_widgets()
 
     def _slider(self, a, b, v):
         s = QSlider(Qt.Horizontal)
@@ -247,7 +270,17 @@ class ControlPanel(QMainWindow):
         c["color_pens"] = self.color_chk.isChecked()
         c["max_pens"] = self.pens_spin.value()
         c["laser"] = self.laser_chk.isChecked()
+        c["pointer"] = self.ptr_combo.currentData()
+        c["finger_click"] = self.click_combo.currentData()
+        self._sync_ptr_widgets()
         self.params_changed.emit()
+
+    def _sync_ptr_widgets(self):
+        doigt = self.ptr_combo.currentData() == "doigt"
+        self.click_combo.setEnabled(doigt)
+        self.ptr_hint.setVisible(doigt)
+        for w in (self.sl_thr, self.sl_min, self.sl_max, self.color_chk):
+            w.setEnabled(not doigt)
 
     def set_url(self, url):
         if url:
@@ -274,9 +307,11 @@ class ControlPanel(QMainWindow):
             p.setPen(QPen(QColor("#38bdf8"), 2))
             p.drawPolygon(QPolygonF([QPointF(x * W, y * H) for x, y in roi]))
         for b in blobs:
-            p.setPen(QPen(QColor(PEN_COLORS.get(b[3], "#ffffff")), 3))
+            col = QColor(PEN_COLORS.get(b[3], "#ffffff"))
+            p.setPen(QPen(col, 3))
+            p.setBrush(col if (len(b) > 4 and b[4]) else Qt.NoBrush)
             p.drawEllipse(QPointF(b[0] * W, b[1] * H), 12, 12)
         p.end()
         self.preview.setPixmap(pm)
-        names = ", ".join(b[3] for b in blobs) or "aucun"
+        names = ", ".join(b[3] + (" (pincé)" if len(b) > 4 and b[4] else "") for b in blobs) or "aucun"
         self.pens_lbl.setText(f"Stylets vus : {names}")

@@ -54,7 +54,7 @@
   <label id="expRow" style="display:none">Exposition <input type="range" id="exp"><span id="expV"></span></label>
   <label id="isoRow" style="display:none">Sensibilité <input type="range" id="iso"><span id="isoV"></span></label>
   <label id="zoomRow" style="display:none">Zoom <input type="range" id="zoom"><span id="zoomV"></span></label>
-  <div class="hint">Astuce : baissez l'exposition jusqu'à ce que la projection soit sombre et que seule la LED du stylet ressorte.</div>
+  <div class="hint" id="modeHint">Astuce : baissez l'exposition jusqu'à ce que la projection soit sombre et que seule la LED du stylet ressorte.</div>
   <div class="row">
     <button id="dim">Écran noir</button>
     <button id="fs">Plein écran</button>
@@ -70,7 +70,8 @@ const video = $("v"), ov = $("ov"), octx = ov.getContext("2d");
 const work = $("work"), wctx = work.getContext("2d", { willReadFrequently: true });
 
 // Paramètres envoyés par le PC
-let cfg = { thr: 225, minA: 2, maxA: 400, roi: null };
+let cfg = { thr: 225, minA: 2, maxA: 400, roi: null, mode: "led", model: false };
+let hand = null, handLoading = false, handError = "", pinch = {}, lastMode = "led";
 let ws = null, track = null, lastBlobs = [], frames = 0, fpsT = performance.now();
 let snapWanted = false, lastPreview = 0, dimmed = false;
 const PW = 640;           // largeur de traitement
@@ -84,7 +85,10 @@ function connect() {
   ws.onerror = () => {};
   ws.onmessage = ev => {
     let m; try { m = JSON.parse(ev.data); } catch (e) { return; }
-    if (m.t === "cfg") { cfg = { thr: m.thr, minA: m.minA, maxA: m.maxA, roi: m.roi }; }
+    if (m.t === "cfg") {
+      cfg = { thr: m.thr, minA: m.minA, maxA: m.maxA, roi: m.roi, mode: m.mode || "led", model: !!m.model };
+      if (cfg.mode !== lastMode) { lastMode = cfg.mode; onModeChange(); }
+    }
     else if (m.t === "snap") { snapWanted = true; }
   };
 }
@@ -144,9 +148,9 @@ function setupControls() {
   if (caps.exposureTime && caps.exposureMode && caps.exposureMode.includes("manual")) {
     slider("expRow", "exp", "expV", caps.exposureTime, "exposureTime", st.exposureTime, { exposureMode: "manual" });
   } else if (caps.exposureCompensation) {
+    expCaps = caps.exposureCompensation;
     slider("expRow", "exp", "expV", caps.exposureCompensation, "exposureCompensation", caps.exposureCompensation.min);
-    // par défaut : exposition au minimum (la projection devient sombre, la LED ressort)
-    track.applyConstraints({ advanced: [{ exposureCompensation: caps.exposureCompensation.min }] }).catch(() => {});
+    onModeChange();   // exposition minimale en mode LED, normale en mode doigt
   }
   if (caps.iso && caps.exposureMode && caps.exposureMode.includes("manual")) {
     slider("isoRow", "iso", "isoV", caps.iso, "iso", st.iso, { exposureMode: "manual" });
@@ -236,6 +240,58 @@ function haloColor(data, w, h, cx, cy, thr) {
   return c ? classify(r / c, g / c, b / c) : null;
 }
 
+// ---------------------------------------------------------------- doigt (MediaPipe Hand Landmarker)
+let expCaps = null;
+function onModeChange() {
+  // le mode doigt a besoin d'une image normale ; le mode LED d'une image sombre
+  if (track && expCaps) {
+    const v = cfg.mode === "doigt" ? Math.max(expCaps.min, Math.min(expCaps.max, 0)) : expCaps.min;
+    track.applyConstraints({ advanced: [{ exposureCompensation: v }] }).catch(() => {});
+    const el = $("exp"); if (el) { el.value = v; $("expV").textContent = (+v).toFixed(1); }
+  }
+  $("modeHint").textContent = cfg.mode === "doigt"
+    ? "Mode doigt : l'index pilote le pointeur. Pincez le pouce et l'index pour cliquer ou écrire. Gardez une exposition normale."
+    : "Astuce : baissez l'exposition jusqu'à ce que la projection soit sombre et que seule la LED du stylet ressorte.";
+}
+async function loadHand() {
+  if (hand || handLoading || !cfg.model) return;
+  handLoading = true; handError = "";
+  setStatus("Chargement de la détection de la main…", "warn");
+  try {
+    const { FilesetResolver, HandLandmarker } = await import("/mp/vision_bundle.mjs");
+    const files = await FilesetResolver.forVisionTasks("/mp/wasm");
+    const opts = d => ({ baseOptions: { modelAssetPath: "/mp/hand_landmarker.task", delegate: d },
+                         runningMode: "VIDEO", numHands: 2, minHandDetectionConfidence: 0.5, minTrackingConfidence: 0.5 });
+    try { hand = await HandLandmarker.createFromOptions(files, opts("GPU")); }
+    catch (e) { hand = await HandLandmarker.createFromOptions(files, opts("CPU")); }
+    setStatus("Connecté au PC — mode doigt", "ok");
+  } catch (e) {
+    handError = "Détection de la main impossible : " + e.message;
+    setStatus(handError, "bad");
+  }
+  handLoading = false;
+}
+let lastTs = 0;
+function detectHands() {
+  if (!hand) { loadHand(); return []; }
+  let ts = performance.now(); if (ts <= lastTs) ts = lastTs + 1; lastTs = ts;
+  const res = hand.detectForVideo(video, ts);
+  const out = [];
+  const roi = cfg.roi ? expand(cfg.roi, 0.08) : null;
+  (res.landmarks || []).forEach((lm, i) => {
+    const label = (res.handedness && res.handedness[i] && res.handedness[i][0]) ? res.handedness[i][0].categoryName : String(i);
+    const d = (a, b) => Math.hypot(lm[a].x - lm[b].x, lm[a].y - lm[b].y);
+    const ratio = d(4, 8) / Math.max(d(0, 9), 1e-6);
+    let p = pinch[label] || false;
+    if (p && ratio > 0.42) p = false; else if (!p && ratio < 0.30) p = true;   // hystérésis
+    pinch[label] = p;
+    const x = lm[8].x, y = lm[8].y;                                            // bout de l'index
+    if (roi && !pointInPoly(x, y, roi)) return;
+    out.push([+x.toFixed(5), +y.toFixed(5), 0, "doigt", p ? 1 : 0]);
+  });
+  return out;
+}
+
 // ---------------------------------------------------------------- boucle image
 function onFrame() {
   const vw = video.videoWidth, vh = video.videoHeight;
@@ -243,8 +299,12 @@ function onFrame() {
     PH = Math.round(PW * vh / vw);
     if (work.width !== PW || work.height !== PH) { work.width = PW; work.height = PH; }
     wctx.drawImage(video, 0, 0, PW, PH);
-    const img = wctx.getImageData(0, 0, PW, PH);
-    lastBlobs = detect(img.data, PW, PH);
+    if (cfg.mode === "doigt") {
+      lastBlobs = detectHands();
+    } else {
+      const img = wctx.getImageData(0, 0, PW, PH);
+      lastBlobs = detect(img.data, PW, PH);
+    }
     send({ t: "b", b: lastBlobs });
     frames++;
     const now = performance.now();
@@ -276,10 +336,11 @@ function drawOverlay() {
     cfg.roi.forEach((p, i) => i ? octx.lineTo(p[0] * ov.width, p[1] * ov.height) : octx.moveTo(p[0] * ov.width, p[1] * ov.height));
     octx.closePath(); octx.stroke();
   }
-  const col = { blanc: "#fff", rouge: "#f87171", vert: "#4ade80", bleu: "#60a5fa" };
+  const col = { blanc: "#fff", rouge: "#f87171", vert: "#4ade80", bleu: "#60a5fa", doigt: "#facc15" };
   lastBlobs.forEach(b => {
-    octx.strokeStyle = col[b[3]] || "#fff"; octx.lineWidth = 3;
-    octx.beginPath(); octx.arc(b[0] * ov.width, b[1] * ov.height, 16, 0, 7); octx.stroke();
+    octx.strokeStyle = col[b[3]] || "#fff"; octx.fillStyle = octx.strokeStyle; octx.lineWidth = 3;
+    octx.beginPath(); octx.arc(b[0] * ov.width, b[1] * ov.height, 16, 0, 7);
+    if (b[3] === "doigt" && b[4]) octx.fill(); else octx.stroke();
   });
 }
 

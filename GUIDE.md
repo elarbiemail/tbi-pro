@@ -17,6 +17,10 @@ TBI Pro transforme n'importe quelle projection (mur, tableau blanc, drap) en **t
 | 🖊️ **Annoter** | Écrit **par-dessus n'importe quel logiciel** (diaporama, PDF, site web). L'écran peut être « figé » pour écrire sur une vidéo, et une capture peut être enregistrée. |
 | 📋 **Tableau** | Tableau blanc plein écran : pages, fonds (blanc, quadrillage, **Seyès**, lignes, ardoise), stylo, surligneur, gomme, formes, images, annuler/rétablir, enregistrement et **export PDF**. |
 
+**Sans stylet : le doigt.** En mode « Doigt », le pointeur suit le **bout de l'index**, reconnu par l'intelligence artificielle de détection de la main (MediaPipe). Pour cliquer, au choix :
+- **pincer le pouce et l'index** : clic maintenu, pour écrire, dessiner ou glisser ;
+- **garder le doigt immobile 1 seconde** : simple clic, pratique en mode souris et pour les boutons.
+
 **Plusieurs stylets en même temps** (modes Annoter et Tableau) : chaque stylet est reconnu par la **couleur de sa LED** (blanc, rouge, vert, bleu). Chaque élève garde son propre outil, sa couleur et son épaisseur. Il suffit de toucher la barre d'outils avec son stylet pour régler *ce* stylet.
 
 ---
@@ -52,6 +56,16 @@ Même montage, avec une **LED infrarouge 850 nm** (la mieux vue par les caméras
 La lumière infrarouge est invisible à l'œil : pour vérifier qu'elle s'allume, regardez-la à travers la caméra d'un portable.
 
 > Avec une caméra IR, toutes les LED ont la même « couleur ». Les stylets sont distingués par leur position : plusieurs élèves peuvent écrire en même temps, mais ils partagent les mêmes réglages d'outil.
+
+### 1c. Pas de stylet : le doigt
+
+Dans le panneau de contrôle, section **« 3. Pointeur »**, choisissez **« Doigt »**.
+- La caméra doit filmer en **exposition normale** : la main doit être bien visible. La page du portable règle cela automatiquement.
+- Le pointeur (cercle jaune) suit l'index. Le cercle se remplit quand vous pincez.
+- **Calibrage au stylet en mode doigt** : placez l'index au centre de chaque cible et **pincez** une demi-seconde. Le calibrage auto fonctionne aussi.
+- Le modèle de détection de la main est inclus dans l'exécutable. En version « code source », il est téléchargé une seule fois (7 Mo) au premier usage.
+- Le mode doigt fonctionne avec le portable (QR code) et la webcam, pas avec la caméra infrarouge.
+- Conseil : tenez-vous de côté pour que la caméra voie bien votre main, sans la cacher avec votre corps.
 
 ---
 
@@ -168,6 +182,8 @@ Au clavier : **Échap** revient au mode souris ; flèches ←/→ pour changer d
 | Le curseur saute partout | **Baissez l'exposition**, montez le seuil, vérifiez la vue caméra : seul le stylet doit être entouré. |
 | Décalage entre stylet et trait | Recalibrez. Vérifiez que l'écran choisi est bien le projecteur. |
 | Le calibrage auto échoue | La caméra doit voir toute la projection. Sinon, calibrez au stylet. |
+| Mode doigt : rien ne se passe | Vérifiez que la main est bien éclairée et visible (cercle jaune dans la vue caméra). Remontez l'exposition sur le portable. Au premier usage depuis le code source, le PC doit être connecté à Internet pour télécharger le modèle. |
+| Mode doigt : clics involontaires | Passez à « Garder le doigt immobile 1 s », ou pincez plus franchement. |
 | Deux stylets de même couleur se mélangent | Utilisez des LED de couleurs différentes, ou espacez les élèves. |
 | Caméra IR : taches parasites | « Réapprendre le fond infrarouge », fermez les rideaux côté soleil, montez le seuil. |
 | Rien ne se passe | Consultez le journal `%APPDATA%\TBIPro\tbipro.log`. |
@@ -181,9 +197,10 @@ Le code est organisé en modules (`tbipro/`) :
 | Fichier | Rôle |
 |---|---|
 | `sources.py` | Sources caméra et **registre `SOURCES`** |
-| `vision.py` | Détection, couleur des LED, fond infrarouge, homographie, suivi multi-stylets |
+| `vision.py` | Détection, couleur des LED, fond infrarouge, détection de la main (pincement), homographie, suivi multi-pointeurs |
+| `handmodel.py` | Modèle de la main (inclus ou téléchargé au premier usage) |
 | `phone/index.html` | Page du portable (caméra + détection en JavaScript) |
 | `app.py` | Contrôleur : boucle principale, modes, distribution des événements |
 | `ui/` | Panneau de contrôle, tableau blanc, calque d'annotation, barre d'outils, calibrage |
 
-Pour brancher un nouveau capteur (Wiimote, caméra réseau, capteur de profondeur…) : créer une classe dérivée de `BaseSource` qui appelle `self._push([(x, y, surface, couleur), …])` avec des coordonnées normalisées (0-1), puis l'ajouter au dictionnaire `SOURCES`. Calibrage, suivi, modes et interface fonctionnent alors sans autre modification.
+Pour brancher un nouveau capteur (Wiimote, caméra réseau, capteur de profondeur…) : créer une classe dérivée de `BaseSource` qui appelle `self._push([(x, y, surface, couleur[, appuyé]), …])` avec des coordonnées normalisées (0-1), puis l'ajouter au dictionnaire `SOURCES`. Calibrage, suivi, modes et interface fonctionnent alors sans autre modification.

@@ -204,6 +204,7 @@ class InkCanvas(QWidget):
         self.tools = {}
         self.active = {}        # id pointeur → geste en cours
         self.frozen = None      # mode annotation : image de l'écran « figé »
+        self.hovers = {}        # id pointeur → position (doigt visible sans appui)
         self._cache = None
         self._toast, self._toast_t = "", 0
         self.setAttribute(Qt.WA_OpaquePaintEvent, not transparent)
@@ -359,6 +360,14 @@ class InkCanvas(QWidget):
         self.update()
         self.changed.emit()
 
+    def set_hover(self, pid, pos):
+        if pos is None:
+            if self.hovers.pop(pid, None) is not None:
+                self.update()
+        else:
+            self.hovers[pid] = self.to_page(pos)
+            self.update()
+
     def cancel_all(self):
         for pid in list(self.active):
             self.pen_up(pid)
@@ -455,6 +464,12 @@ class InkCanvas(QWidget):
                 p.setPen(QPen(QColor(120, 120, 120, 200), 2, Qt.DashLine))
                 p.setBrush(QColor(255, 255, 255, 60))
                 p.drawEllipse(QPointF(*g["last"]), r, r)
+        for (hx, hy) in self.hovers.values():          # curseur du doigt
+            p.setPen(QPen(QColor(250, 204, 21), 3))
+            p.setBrush(QColor(250, 204, 21, 60))
+            p.drawEllipse(QPointF(hx, hy), 14, 14)
+            p.setBrush(QColor(250, 204, 21))
+            p.drawEllipse(QPointF(hx, hy), 3, 3)
         p.restore()
         if self._toast and time.time() - self._toast_t < 2.5:
             f = p.font()

@@ -13,6 +13,7 @@ import base64
 import datetime
 import ipaddress
 import json
+import mimetypes
 import os
 import socket
 import ssl
@@ -23,7 +24,12 @@ import time
 import numpy as np
 
 from .config import app_dir, resource_path
-from . import vision
+from . import handmodel, vision
+
+# Le registre Windows associe parfois .js à text/plain : les navigateurs refuseraient les modules.
+mimetypes.add_type("text/javascript", ".js")
+mimetypes.add_type("text/javascript", ".mjs")
+mimetypes.add_type("application/wasm", ".wasm")
 
 
 def decode_jpeg(data):
@@ -43,7 +49,7 @@ class BaseSource:
         self._preview = None          # ("jpeg", bytes) ou ("bgr", ndarray)
         self._snapshot = None
         self._snap_wanted = False
-        self.params = {"threshold": 225, "min_area": 2, "max_area": 400, "roi": None}
+        self.params = {"threshold": 225, "min_area": 2, "max_area": 400, "roi": None, "mode": "led"}
         self.fps = 0.0
         self._fps_n, self._fps_t = 0, time.time()
 
@@ -120,13 +126,19 @@ class WebcamSource(BaseSource):
             return
         cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
         last_prev = 0
+        hand = None
         while self.running:
             ok, frame = cap.read()
             if not ok:
                 time.sleep(0.02)
                 continue
             p = self.params
-            blobs = vision.detect_blobs(frame, p["threshold"], p["min_area"], p["max_area"], p["roi"])
+            if p.get("mode") == "doigt":
+                if hand is None:
+                    hand = self._hand_detector()
+                blobs = hand.detect(frame, p["roi"]) if hand else []
+            else:
+                blobs = vision.detect_blobs(frame, p["threshold"], p["min_area"], p["max_area"], p["roi"])
             self._push(blobs)
             now = time.time()
             with self._lock:
@@ -136,9 +148,25 @@ class WebcamSource(BaseSource):
                     self._preview, last_prev = ("bgr", frame), now
         cap.release()
 
+    def _hand_detector(self):
+        path = handmodel.model_path()
+        if not path:
+            handmodel.ensure_async()
+            return None
+        try:
+            return vision.HandDetector(path)
+        except ImportError:
+            self.error = "Mode doigt : le module « mediapipe » n'est pas installé"
+        except Exception as e:
+            self.error = f"Mode doigt indisponible : {e}"
+        self.params["mode"] = "led"
+        return None
+
     def status(self):
         if self.error:
             return self.error
+        if handmodel.status():
+            return handmodel.status()
         return f"Webcam {self.src} : {self.fps:.0f} img/s" if self.connected() else "En attente de la caméra…"
 
 
@@ -277,6 +305,8 @@ class PhoneSource(BaseSource):
             self.loop.call_soon_threadsafe(self.loop.stop)
 
     def set_params(self, **kw):
+        if kw.get("mode") == "doigt" and not handmodel.model_path():
+            handmodel.ensure_async(lambda _p: self._broadcast({"t": "cfg", **self._cfg_msg()}))
         super().set_params(**kw)
         self._broadcast({"t": "cfg", **self._cfg_msg()})
 
@@ -286,7 +316,8 @@ class PhoneSource(BaseSource):
 
     def _cfg_msg(self):
         p = self.params
-        return {"thr": p["threshold"], "minA": p["min_area"], "maxA": p["max_area"], "roi": p["roi"]}
+        return {"thr": p["threshold"], "minA": p["min_area"], "maxA": p["max_area"], "roi": p["roi"],
+                "mode": p.get("mode", "led"), "model": bool(handmodel.model_path())}
 
     def _broadcast(self, msg):
         if not self.loop:
@@ -313,6 +344,13 @@ class PhoneSource(BaseSource):
 
         async def index(request):
             return web.FileResponse(page, headers={"Cache-Control": "no-store"})
+
+        async def model(request):
+            path = handmodel.model_path()
+            if not path:
+                handmodel.ensure_async(lambda _p: self._broadcast({"t": "cfg", **self._cfg_msg()}))
+                return web.Response(status=503, text="Modèle en cours de téléchargement sur le PC")
+            return web.FileResponse(path)
 
         async def ws_handler(request):
             ws = web.WebSocketResponse(heartbeat=5, max_msg_size=8 * 1024 * 1024)
@@ -347,6 +385,8 @@ class PhoneSource(BaseSource):
         app = web.Application()
         app.router.add_get("/", index)
         app.router.add_get("/ws", ws_handler)
+        app.router.add_get("/mp/hand_landmarker.task", model)
+        app.router.add_static("/mp/", resource_path("phone", "mp"))
         try:
             crt, key = ensure_certificate(self.ips)
             ctx = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
@@ -362,6 +402,8 @@ class PhoneSource(BaseSource):
     def status(self):
         if self.error:
             return self.error
+        if handmodel.status():
+            return handmodel.status()
         if not self.clients:
             return "Scannez le QR code avec le portable"
         if not self.connected():

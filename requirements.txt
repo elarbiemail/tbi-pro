@@ -4,4 +4,5 @@ numpy>=1.24
 aiohttp>=3.9
 cryptography>=41
 qrcode>=7.4
+mediapipe>=0.10.14
 pynput>=1.7 ; sys_platform != "win32"
