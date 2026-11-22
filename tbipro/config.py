@@ -5,7 +5,7 @@ import os
 import sys
 
 APP_NAME = "TBI Pro"
-VERSION = "1.0.0"
+VERSION = "2.0.0"
 
 
 def app_dir():

@@ -14,6 +14,7 @@ if not exist "tbipro\phone\mp\hand_landmarker.task" (
   --icon tbipro\icon.ico ^
   --add-data "tbipro\phone;tbipro\phone" ^
   --add-data "tbipro\icon.ico;tbipro" ^
+  --add-data "GUIDE.md;." ^
   --exclude-module PySide6.QtWebEngineCore --exclude-module PySide6.Qt3DCore --exclude-module PySide6.QtQuick ^
   --exclude-module tkinter --exclude-module matplotlib ^
   --collect-all mediapipe ^

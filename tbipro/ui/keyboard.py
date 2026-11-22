@@ -95,7 +95,9 @@ def projected_dialog(dlg, screen, full=False, size=(1100, 720)):
     """Affiche une boîte de dialogue sur l'écran projeté, au premier plan."""
     dlg.setWindowFlags(dlg.windowFlags() | Qt.WindowStaysOnTopHint)
     g = screen.geometry() if screen else None
-    if g is not None:
+    if g is None:
+        dlg.resize(*size)
+    else:
         if full:
             dlg.setGeometry(g.adjusted(40, 30, -40, -30))
         else:

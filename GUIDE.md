@@ -66,6 +66,8 @@ Dans le panneau de contrôle, section **« 3. Pointeur »**, choisissez **« Doi
 - Le modèle de détection de la main est inclus dans l'exécutable. En version « code source », il est téléchargé une seule fois (7 Mo) au premier usage.
 - Le mode doigt fonctionne avec le portable (QR code) et la webcam, pas avec la caméra infrarouge.
 - Conseil : tenez-vous de côté pour que la caméra voie bien votre main, sans la cacher avec votre corps.
+- Sur le portable, le **squelette de la main** reconnue s'affiche en bleu : vous voyez immédiatement si l'IA voit votre main. Le panneau du PC indique aussi « main : 1 détectée ✓ » ou « aucune ».
+- **Calibrage au doigt** : pointez l'index au centre de chaque cible et gardez-le **immobile 1 seconde** (ou pincez).
 - **Précision** : après le calibrage, l'option « Zoomer sur la projection avant la détection » ne fait analyser que la zone utile de l'image, agrandie. Le pincement est mesuré en 3D (en centimètres réels), donc il reste fiable quelle que soit l'orientation de la main. Le réglage « Stabilisation du pointeur » supprime les tremblements à l'arrêt sans ralentir le tracé rapide.
 
 ---
@@ -140,9 +142,9 @@ Les réglages et le calibrage sont enregistrés : au prochain lancement, tout es
 
 ---
 
-## 5. La barre latérale (Annoter et Tableau)
+## 5. La barre d'outils (Annoter et Tableau)
 
-La barre se **masque toute seule** après quelques secondes sans être touchée : il reste un petit onglet **☰** au bord de l'écran. Touchez-le pour la faire revenir. **📌** épingle la barre (elle ne se masque plus), **⇆** la passe de l'autre côté, **«** la masque tout de suite.
+La barre est **horizontale, en bas de l'écran**. Elle se **masque toute seule** après quelques secondes sans être touchée : il reste un onglet **☰ Outils** au bord de l'écran. Touchez-le pour la faire revenir. **📌** épingle la barre (elle ne se masque plus), **⇅** la place en haut ou en bas, **⌄** la masque tout de suite.
 
 **Barre principale (outils les plus utilisés)**
 
@@ -154,7 +156,9 @@ La barre se **masque toute seule** après quelques secondes sans être touchée 
 | ✏️ 🖍️ 🧽 | Stylo, surligneur, gomme |
 | ✍️ | **Écriture → texte** : écrivez à la main. Une seconde et demie après le dernier trait, l'écriture est reconnue (en français) et remplacée par du texte tapé, à la même taille. Nécessite Internet. |
 | 🪄 | **Stylo de formes** : dessinez à main levée un cercle, une ellipse, un rectangle, un carré, un triangle, un polygone, une ligne ou une flèche, qui est remplacé par une forme nette. Fonctionne sans Internet. |
+| 🖌️ | **Croquis → icône** : dessinez un objet simple (soleil, maison, chat…). Une barre d'icônes proposées apparaît : touchez celle qui convient pour remplacer le dessin, ou ✕ pour garder le dessin. Nécessite Internet. |
 | 🔤 | Texte au clavier virtuel |
+| 🗒️ | **Post-it** : touchez la page, écrivez la note. Le post-it se déplace, **s'agrandit** et pivote avec 🖐️. Le texte s'adapte à la taille. 🎨 (sous le post-it sélectionné) change sa couleur. Pour **transformer une note en post-it**, sélectionnez un texte, un trait manuscrit ou une image et touchez 🗒. |
 | ╱ ➚ ▭ ◯ △ ☆ | Ligne, flèche, rectangle, ellipse, triangle, étoile |
 | Couleurs, 🎨 | 8 couleurs + **toutes les couleurs** (nuancier) |
 | • ● ⬤, ◧ | Épaisseur ; formes **pleines** ou vides |

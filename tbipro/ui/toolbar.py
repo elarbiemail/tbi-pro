@@ -164,7 +164,9 @@ class Toolbar(QFrame):
             B("☁️", "Nuage de mots (QR code élèves)", lambda: self.action.emit("cloud")),
             B("🧠", "Carte mentale", lambda: self.action.emit("mindmap")),
             B("📸", "Capture d'écran / vidéo avec éditeur", lambda: self.action.emit("capture")),
-            B("⚙️", "Panneau de contrôle", self.panel_requested.emit)])
+            B("⚙️", "Panneau de contrôle", self.panel_requested.emit),
+            B("❓", "Aide", lambda: self.action.emit("help")),
+            B("ℹ️", "À propos", lambda: self.action.emit("about"))])
         if kind == "board":
             self.page_lbl = QLabel("Page 1 / 1")
             self.page_lbl.setAlignment(Qt.AlignCenter)

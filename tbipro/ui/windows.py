@@ -54,7 +54,10 @@ class ToolsMixin:
             self.toolbar.set_color(dlg.selectedColor().name())
 
     def common_action(self, act):
-        if act == "capture":
+        if act in ("help", "about"):
+            from .about import AboutDialog, HelpDialog
+            (HelpDialog if act == "help" else AboutDialog)(self, self._scr()).exec()
+        elif act == "capture":
             from .capture import CaptureController
             tb = self.toolbar
             self._capture = CaptureController(self._scr(), self.canvas, self,

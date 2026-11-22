@@ -124,6 +124,15 @@ class ControlPanel(QMainWindow):
         self.chip_cal.setObjectName("chip")
         hl.addWidget(self.chip_cam)
         hl.addWidget(self.chip_cal)
+        for text, tip, fn in (("❓ Aide", "Aide (F1)", self.open_help), ("ℹ️ À propos", "À propos de TBI Pro", self.open_about)):
+            b = QPushButton(text)
+            b.setToolTip(tip)
+            b.setStyleSheet("QPushButton{background:rgba(255,255,255,0.18);color:white;border:0;border-radius:12px;"
+                            "padding:8px 14px;font-weight:700;} QPushButton:hover{background:rgba(255,255,255,0.3);}")
+            b.clicked.connect(lambda _=False, fn=fn: fn())
+            hl.addWidget(b)
+        from PySide6.QtGui import QKeySequence, QShortcut
+        QShortcut(QKeySequence("F1"), self, activated=self.open_help)
         outer.addWidget(head)
         lay = QHBoxLayout()
         outer.addLayout(lay, 1)
@@ -284,6 +293,14 @@ class ControlPanel(QMainWindow):
         self.crop_chk.toggled.connect(self._on_params)
         self._sync_src_widgets()
         self._sync_ptr_widgets()
+
+    def open_help(self):
+        from .about import HelpDialog
+        HelpDialog(self, self.screen()).exec()
+
+    def open_about(self):
+        from .about import AboutDialog
+        AboutDialog(self, self.screen()).exec()
 
     def _slider(self, a, b, v):
         s = QSlider(Qt.Horizontal)
