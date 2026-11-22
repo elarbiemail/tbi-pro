@@ -34,6 +34,7 @@ jobs:
           --exclude-module PySide6.QtWebEngineCore --exclude-module PySide6.Qt3DCore --exclude-module PySide6.QtQuick
           --exclude-module tkinter --exclude-module matplotlib
           --collect-all mediapipe
+          --collect-all imageio_ffmpeg --collect-all soundcard
           run.py
       - name: Archive
         run: Compress-Archive -Path "dist/TBI Pro" -DestinationPath "TBI-Pro-Windows.zip"

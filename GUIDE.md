@@ -175,8 +175,8 @@ La barre se **masque toute seule** après quelques secondes sans être touchée 
 
 Le bouton **📸** se trouve dans le panneau « ⋯ Plus », dans la barre d'annotation et sur le bouton flottant du mode souris. Il propose :
 - **Capturer tout l'écran** ou **une zone** (tracée au stylet), puis l'**éditeur d'image** : ✂️ recadrer, ➚ flèche, ▭ cadre, ◯ cercle, ✏️ stylo, 🖍️ surligneur, 🔤 texte, 🌫️ **flouter** (pour masquer un nom ou un numéro), ① numéros d'étapes, couleurs, épaisseurs, ↶ annuler. On peut ensuite 💾 enregistrer (Documents\TBI Pro\Captures), 📋 copier, ou 📌 **insérer l'image dans le tableau**.
-- **Enregistrer l'écran en vidéo** (entier ou une zone) : un petit panneau ⏺ 00:00 ⏸ ⏹ apparaît en haut de l'écran. Les annotations au stylet sont enregistrées aussi. La vidéo MP4 est rangée dans Documents\TBI Pro\Vidéos. Le son n'est pas enregistré.
-- **L'éditeur vidéo** s'ouvre à la fin de l'enregistrement : lecture, ⏮ début ici, ⏭ fin ici, ✂️ **exporter la partie découpée**. « Ouvrir et découper une vidéo enregistrée » le rouvre plus tard.
+- **Enregistrer l'écran en vidéo** (entier ou une zone) : un petit panneau ⏺ 00:00 ⏸ ⏹ apparaît en haut de l'écran. Les annotations au stylet sont enregistrées aussi. Cochez **🎤 Enregistrer ma voix** (micro) et/ou **🔊 Enregistrer les sons de l'ordinateur** (vidéo, son d'un diaporama, page web…) : les deux sont mélangés et synchronisés avec l'image. La vidéo MP4 (H.264 + AAC, lisible partout : téléphone, Classroom, WhatsApp, YouTube) est rangée dans Documents\TBI Pro\Vidéos. Le micro et les haut-parleurs utilisés sont ceux réglés par défaut dans Windows.
+- **L'éditeur vidéo** s'ouvre à la fin de l'enregistrement : lecture (image), 🔊 lecture avec le son dans le lecteur de Windows, ⏮ début ici, ⏭ fin ici, ✂️ **exporter la partie découpée** (avec le son). « Ouvrir et découper une vidéo enregistrée » le rouvre plus tard.
 
 Le tableau est **sauvegardé automatiquement** toutes les 2 minutes dans `Documents\TBI Pro\Sauvegardes automatiques`.
 
@@ -233,6 +233,7 @@ Touchez une vignette : l'image est insérée au centre de la page. Déplacez-la 
 | Décalage entre stylet et trait | Recalibrez. Vérifiez que l'écran choisi est bien le projecteur. |
 | Le calibrage auto échoue | La caméra doit voir toute la projection. Sinon, calibrez au stylet. |
 | Mode doigt : rien ne se passe | Vérifiez que la main est bien éclairée et visible (cercle jaune dans la vue caméra). Remontez l'exposition sur le portable. Au premier usage depuis le code source, le PC doit être connecté à Internet pour télécharger le modèle. |
+| Vidéo sans son | Vérifiez dans Windows (Paramètres → Son) le micro et la sortie par défaut, et autorisez l'accès au micro pour les applications de bureau (Paramètres → Confidentialité → Microphone). |
 | Nuage de mots : les élèves n'accèdent pas à la page | Ils doivent être sur le même Wi-Fi que le PC, et le pare-feu Windows doit autoriser TBI Pro sur les réseaux privés. |
 | Banques en ligne : « Connexion impossible » | Vérifiez Internet sur le PC. Le réseau de l'établissement bloque peut-être certains sites : essayez une autre banque. |
 | Mode doigt : clics involontaires | Passez à « Garder le doigt immobile 1 s », ou pincez plus franchement. |

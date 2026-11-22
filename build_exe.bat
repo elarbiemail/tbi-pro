@@ -17,6 +17,7 @@ if not exist "tbipro\phone\mp\hand_landmarker.task" (
   --exclude-module PySide6.QtWebEngineCore --exclude-module PySide6.Qt3DCore --exclude-module PySide6.QtQuick ^
   --exclude-module tkinter --exclude-module matplotlib ^
   --collect-all mediapipe ^
+  --collect-all imageio_ffmpeg --collect-all soundcard ^
   run.py || (pause & exit /b)
 echo.
 echo Termine : le logiciel est dans dist\TBI Pro\TBI Pro.exe

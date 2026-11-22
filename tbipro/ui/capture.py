@@ -17,10 +17,11 @@ import time
 import numpy as np
 from PySide6.QtCore import QPointF, QRect, QRectF, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QCursor, QFont, QGuiApplication, QImage, QPainter, QPen, QPixmap, QPolygonF
-from PySide6.QtWidgets import (QApplication, QDialog, QFrame, QGridLayout, QHBoxLayout, QLabel, QPushButton, QSlider,
-                               QVBoxLayout, QWidget)
+from PySide6.QtWidgets import (QApplication, QCheckBox, QDialog, QFrame, QGridLayout, QHBoxLayout, QLabel, QPushButton,
+                               QSlider, QVBoxLayout, QWidget)
 
 from ..config import documents_dir
+from . import audio
 from .keyboard import DIALOG_CSS, TextDialog, projected_dialog
 
 EDIT_COLORS = ["#dc2626", "#f59e0b", "#16a34a", "#2563eb", "#9333ea", "#111827", "#ffffff"]
@@ -396,10 +397,13 @@ class ImageEditor(QDialog):
 # Enregistrement vidéo de l'écran
 # ============================================================================
 class ScreenRecorder(QFrame):
-    """Petit panneau flottant ⏺ 00:00 ⏸ ⏹ ; les images sont encodées en MP4 dans un fil séparé."""
+    """
+    Petit panneau flottant ⏺ 00:00 ⏸ ⏹. Les images sont encodées dans un fil séparé, au rythme
+    de l'horloge (images répétées si la machine est lente) : le son reste synchronisé.
+    """
     finished = Signal(str)
 
-    def __init__(self, screen, region=None, fps=12):
+    def __init__(self, screen, region=None, fps=15, mic=False, system=False):
         super().__init__(None, Qt.Tool | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.WindowDoesNotAcceptFocus)
         self.setAttribute(Qt.WA_ShowWithoutActivating, True)
         self.screen_ref, self.region, self.fps = screen, region, fps
@@ -413,6 +417,8 @@ class ScreenRecorder(QFrame):
         lay.setContentsMargins(10, 8, 10, 8)
         self.lbl = QLabel("⏺ 00:00")
         lay.addWidget(self.lbl)
+        self.snd = QLabel(("🎤" if mic else "") + ("🔊" if system else ""))
+        lay.addWidget(self.snd)
         self.btn_pause = QPushButton("⏸")
         self.btn_pause.setFocusPolicy(Qt.NoFocus)
         self.btn_pause.clicked.connect(self.toggle_pause)
@@ -421,8 +427,12 @@ class ScreenRecorder(QFrame):
         stop.setFocusPolicy(Qt.NoFocus)
         stop.clicked.connect(self.stop)
         lay.addWidget(stop)
-        self.path = os.path.join(videos_dir(), f"Video_{stamp()}.mp4")
-        self.q = queue.Queue(maxsize=90)
+        base = os.path.join(videos_dir(), f"Video_{stamp()}")
+        self.path = base + ".mp4"
+        self.raw_path = base + "_image.avi" if (mic or system) or audio.ffmpeg_exe() else self.path
+        self.wav_path = base + "_son.wav"
+        self.audio = audio.AudioRecorder(mic, system) if (mic or system) else None
+        self.q = queue.Queue(maxsize=120)
         self.paused = False
         self.elapsed = 0.0
         self.t_last = None
@@ -440,7 +450,10 @@ class ScreenRecorder(QFrame):
         self.size_wh = (w - w % 2, h - h % 2)
         self.writer_thread = threading.Thread(target=self._writer, daemon=True)
         self.writer_thread.start()
+        if self.audio:
+            self.audio.start()
         self.t_last = time.time()
+        self.q.put((0.0, first))
         self.timer.start()
 
     def _frame(self):
@@ -454,9 +467,9 @@ class ScreenRecorder(QFrame):
         if not self.paused:
             self.elapsed += now - self.t_last
             try:
-                self.q.put_nowait(self._frame())
+                self.q.put_nowait((self.elapsed, self._frame()))
             except queue.Full:
-                pass                          # machine trop lente : on saute une image
+                pass
         self.t_last = now
         m, s = divmod(int(self.elapsed), 60)
         self.lbl.setText(("⏸ " if self.paused else "⏺ ") + f"{m:02d}:{s:02d}")
@@ -464,27 +477,66 @@ class ScreenRecorder(QFrame):
     def _writer(self):
         import cv2
         w, h = self.size_wh
-        vw = cv2.VideoWriter(self.path, cv2.VideoWriter_fourcc(*"mp4v"), self.fps, (w, h))
+        fourcc = cv2.VideoWriter_fourcc(*("MJPG" if self.raw_path.endswith(".avi") else "mp4v"))
+        vw = cv2.VideoWriter(self.raw_path, fourcc, self.fps, (w, h))
+        written, last = 0, None
         while True:
-            f = self.q.get()
-            if f is None:
+            item = self.q.get()
+            if item is None:
                 break
+            t, f = item
             if f.shape[1] != w or f.shape[0] != h:
                 f = cv2.resize(f, (w, h))
-            vw.write(f)
+            target = int(round(t * self.fps)) + 1
+            while written < target:                    # rattrapage : on répète l'image
+                vw.write(f)
+                written += 1
+            last = f
+        end = int(round(self.elapsed * self.fps)) + 1
+        while last is not None and written < end:
+            vw.write(last)
+            written += 1
         vw.release()
 
     def toggle_pause(self):
         self.paused = not self.paused
+        if self.audio:
+            self.audio.paused = self.paused
         self.btn_pause.setText("▶" if self.paused else "⏸")
 
     def stop(self):
         self.timer.stop()
-        self.hide()
+        self.lbl.setText("⏳ Finalisation…")
+        self.btn_pause.setEnabled(False)
+        QApplication.processEvents()
         self.q.put(None)
         if self.writer_thread:
-            self.writer_thread.join(timeout=20)
-        self.finished.emit(self.path)
+            self.writer_thread.join(timeout=60)
+        result = {"path": self.path, "err": ""}
+
+        def finalize():
+            wav = None
+            if self.audio:
+                wav, err = self.audio.stop(self.wav_path)
+                if err:
+                    result["err"] = "Son : " + err
+            if self.raw_path != self.path:
+                try:
+                    audio.mux(self.raw_path, wav, self.path)
+                    os.remove(self.raw_path)
+                except Exception as e:                 # ffmpeg indisponible : on garde l'image seule
+                    result["path"] = self.raw_path
+                    result["err"] = f"Assemblage image/son impossible : {e}"
+            if wav and os.path.exists(wav) and result["path"] == self.path:
+                os.remove(wav)
+        th = threading.Thread(target=finalize, daemon=True)
+        th.start()
+        while th.is_alive():
+            QApplication.processEvents()
+            time.sleep(0.05)
+        self.hide()
+        self.error = result["err"]
+        self.finished.emit(result["path"])
         self.deleteLater()
 
 
@@ -492,7 +544,7 @@ class ScreenRecorder(QFrame):
 # Éditeur vidéo (lecture + découpe)
 # ============================================================================
 class VideoEditor(QDialog):
-    def __init__(self, path, parent=None, screen=None):
+    def __init__(self, path, parent=None, screen=None, note=""):
         super().__init__(parent)
         import cv2
         self.cv2 = cv2
@@ -523,7 +575,8 @@ class VideoEditor(QDialog):
         self.info.setObjectName("info")
         v.addWidget(self.info)
         row = QHBoxLayout()
-        for text, fn, name in [("▶ Lire / ⏸", self.toggle_play, ""), ("⏮ Début ici", self.set_start, ""),
+        for text, fn, name in [("▶ Lire / ⏸", self.toggle_play, ""), ("🔊 Lire avec le son", self.play_external, ""),
+                               ("⏮ Début ici", self.set_start, ""),
                                ("⏭ Fin ici", self.set_end, ""), ("✂️ Exporter la découpe", self.export, "ok"),
                                ("📁 Dossier Vidéos", self.open_folder, ""), ("✖ Fermer", self.reject, "cancel")]:
             b = QPushButton(text)
@@ -535,6 +588,8 @@ class VideoEditor(QDialog):
         self.play_timer = QTimer(self, interval=int(1000 / self.fps), timeout=self._next)
         projected_dialog(self, screen, full=True)
         QTimer.singleShot(50, lambda: self.show_frame(0))
+        if note:
+            self.info.setText(note)
 
     def _read(self, i):
         self.cap.set(self.cv2.CAP_PROP_POS_FRAMES, i)
@@ -574,9 +629,21 @@ class VideoEditor(QDialog):
         self.end_f = max(self.slider.value(), self.start_f)
         self.show_frame(self.slider.value())
 
+    def play_external(self):
+        from PySide6.QtCore import QUrl
+        from PySide6.QtGui import QDesktopServices
+        QDesktopServices.openUrl(QUrl.fromLocalFile(self.path))
+
     def export(self):
         cv2 = self.cv2
         out = os.path.splitext(self.path)[0] + f"_decoupe_{stamp()}.mp4"
+        if audio.ffmpeg_exe():                         # découpe avec le son
+            try:
+                audio.trim(self.path, self.start_f / self.fps, (self.end_f + 1) / self.fps, out)
+                self.info.setText("✅ Vidéo exportée (avec le son) : " + os.path.basename(out))
+                return out
+            except Exception as e:
+                print("Découpe ffmpeg impossible :", e)
         self.cap.set(cv2.CAP_PROP_POS_FRAMES, self.start_f)
         w = int(self.cap.get(cv2.CAP_PROP_FRAME_WIDTH))
         h = int(self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
@@ -604,6 +671,9 @@ class VideoEditor(QDialog):
 # ============================================================================
 # Menu de capture
 # ============================================================================
+AUDIO_PREFS = {"mic": True, "sys": True}
+
+
 class CaptureMenu(QDialog):
     """Choix : capture écran entier / zone, vidéo écran entier / zone, rouvrir une vidéo."""
 
@@ -622,14 +692,29 @@ class CaptureMenu(QDialog):
             b = QPushButton(text)
             b.clicked.connect(lambda _=False, k=key: self._pick(k))
             v.addWidget(b)
+            if key == "vid_zone":
+                mic_ok, sys_ok, msg = audio.audio_available()
+                row = QHBoxLayout()
+                self.chk_mic = QCheckBox("🎤 Enregistrer ma voix (micro)")
+                self.chk_sys = QCheckBox("🔊 Enregistrer les sons de l'ordinateur")
+                for c, ok, key2 in ((self.chk_mic, mic_ok, "mic"), (self.chk_sys, sys_ok, "sys")):
+                    c.setStyleSheet("QCheckBox{font-size:13pt;padding:6px;} QCheckBox::indicator{width:26px;height:26px;}")
+                    c.setEnabled(ok)
+                    c.setChecked(ok and AUDIO_PREFS.get(key2, True))
+                    if not ok:
+                        c.setToolTip(msg or "Périphérique introuvable")
+                    row.addWidget(c)
+                v.addLayout(row)
         c = QPushButton("✖  Annuler")
         c.setObjectName("cancel")
         c.clicked.connect(self.reject)
         v.addWidget(c)
-        projected_dialog(self, screen, size=(620, 560))
+        projected_dialog(self, screen, size=(760, 640))
 
     def _pick(self, k):
         self.choice = k
+        AUDIO_PREFS["mic"] = self.chk_mic.isChecked()
+        AUDIO_PREFS["sys"] = self.chk_sys.isChecked()
         self.accept()
 
 
@@ -663,17 +748,18 @@ class CaptureController:
                 dpr = img.width() / self.screen.geometry().width()
                 r = sel.rect_result
                 region = QRect(r.x(), r.y(), r.width(), r.height()) if dpr else r
-            self.recorder = ScreenRecorder(self.screen, region)
+            self.recorder = ScreenRecorder(self.screen, region, mic=m.chk_mic.isChecked(), system=m.chk_sys.isChecked())
             self.recorder.finished.connect(self._recorded)
             self.recorder.start()
         elif k == "vid_edit":
             from PySide6.QtWidgets import QFileDialog
-            path, _ = QFileDialog.getOpenFileName(self.parent, "Ouvrir une vidéo", videos_dir(), "Vidéos (*.mp4 *.avi)",
+            path, _ = QFileDialog.getOpenFileName(self.parent, "Ouvrir une vidéo", videos_dir(), "Vidéos (*.mp4 *.avi *.mkv)",
                                                   options=QFileDialog.Option.DontUseNativeDialog)
             if path:
                 VideoEditor(path, self.parent, self.screen).exec()
 
     def _recorded(self, path):
+        note = getattr(self.recorder, "error", "")
         self.recorder = None
         if os.path.exists(path) and os.path.getsize(path) > 0:
-            VideoEditor(path, self.parent, self.screen).exec()
+            VideoEditor(path, self.parent, self.screen, note).exec()
