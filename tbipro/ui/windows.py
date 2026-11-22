@@ -54,7 +54,13 @@ class ToolsMixin:
             self.toolbar.set_color(dlg.selectedColor().name())
 
     def common_action(self, act):
-        if act == "color":
+        if act == "capture":
+            from .capture import CaptureController
+            tb = self.toolbar
+            self._capture = CaptureController(self._scr(), self.canvas, self,
+                                              hide=(tb, tb.more, tb.tab, self.timer_panel))
+            self._capture.run()
+        elif act == "color":
             self._pick_color()
         elif act == "picker":
             PickerDialog(self, self._scr()).exec()
@@ -258,6 +264,7 @@ class Floater(QWidget):
     """Petit bouton toujours visible en mode souris, pour passer en annotation / tableau."""
     mode_requested = Signal(str)
     panel_requested = Signal()
+    capture_requested = Signal()
 
     def __init__(self):
         super().__init__(None, Qt.Tool | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.WindowDoesNotAcceptFocus)
@@ -272,6 +279,7 @@ class Floater(QWidget):
         self.extra = []
         for icon, tip, fn in [("🖊️", "Annoter l'écran", lambda: self.mode_requested.emit("annoter")),
                               ("📋", "Tableau blanc", lambda: self.mode_requested.emit("tableau")),
+                              ("📸", "Capture d'écran / vidéo", self.capture_requested.emit),
                               ("⚙️", "Panneau de contrôle", self.panel_requested.emit)]:
             b = QPushButton(icon)
             b.setToolTip(tip)

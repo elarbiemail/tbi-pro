@@ -9,6 +9,7 @@ Tableau blanc interactif à faible coût : un vidéoprojecteur, un PC Windows, u
 - **Barre latérale** à masquage automatique ; **sélection** : déplacer, redimensionner, pivoter tout objet.
 - **Reconnaissance** de l'écriture manuscrite (→ texte) et des formes.
 - **Pro** : projecteur, rideau, import PDF, gestion des pages, fonds (Seyès, repère, millimétré, portées), tirage au sort, sauvegarde automatique.
+- **Capture** d'écran (entier/zone) avec éditeur d'image, **enregistrement vidéo** de l'écran avec découpe.
 - **Outils** : règle, équerre, rapporteur, compas, texte, minuteur, nuage de mots collaboratif (QR code), carte mentale.
 - **Bibliothèque d'images** : pictogrammes hors ligne + banques libres en ligne (ARASAAC, Openverse, Wikimedia Commons, OpenMoji/Noto).
 - **Doigt** : le pointeur suit l'index de la main ; pincer pouce + index = clic.

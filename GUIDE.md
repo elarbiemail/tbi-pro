@@ -171,6 +171,13 @@ La barre se **masque toute seule** après quelques secondes sans être touchée 
 | Pages | ◀ ▶ ➕, 🗂️ **gestion des pages** (aperçus, afficher, dupliquer, réordonner, supprimer), ▦ **fonds** : blanc, quadrillage, Seyès, lignes, points, **papier millimétré**, **repère orthonormé**, **portées musicales**, ardoise, noir |
 | Fichiers | 💾 enregistrer, 📂 ouvrir, 📥 **importer un PDF** (chaque page devient une page du tableau sur laquelle on écrit ; pour un diaporama, exportez-le d'abord en PDF), 📄 exporter en PDF |
 
+### Capture d'écran et vidéo (📸)
+
+Le bouton **📸** se trouve dans le panneau « ⋯ Plus », dans la barre d'annotation et sur le bouton flottant du mode souris. Il propose :
+- **Capturer tout l'écran** ou **une zone** (tracée au stylet), puis l'**éditeur d'image** : ✂️ recadrer, ➚ flèche, ▭ cadre, ◯ cercle, ✏️ stylo, 🖍️ surligneur, 🔤 texte, 🌫️ **flouter** (pour masquer un nom ou un numéro), ① numéros d'étapes, couleurs, épaisseurs, ↶ annuler. On peut ensuite 💾 enregistrer (Documents\TBI Pro\Captures), 📋 copier, ou 📌 **insérer l'image dans le tableau**.
+- **Enregistrer l'écran en vidéo** (entier ou une zone) : un petit panneau ⏺ 00:00 ⏸ ⏹ apparaît en haut de l'écran. Les annotations au stylet sont enregistrées aussi. La vidéo MP4 est rangée dans Documents\TBI Pro\Vidéos. Le son n'est pas enregistré.
+- **L'éditeur vidéo** s'ouvre à la fin de l'enregistrement : lecture, ⏮ début ici, ⏭ fin ici, ✂️ **exporter la partie découpée**. « Ouvrir et découper une vidéo enregistrée » le rouvre plus tard.
+
 Le tableau est **sauvegardé automatiquement** toutes les 2 minutes dans `Documents\TBI Pro\Sauvegardes automatiques`.
 
 ### Outils de classe

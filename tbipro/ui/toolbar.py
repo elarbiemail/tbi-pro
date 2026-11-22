@@ -118,7 +118,7 @@ class Toolbar(QFrame):
         if kind == "board":
             edit.append(B("▶", "Page suivante (crée une page à la fin)", self._do(self._next_page)))
         else:
-            edit.append(B("📸", "Capture d'écran (Documents/TBI Pro)", lambda: self.action.emit("capture")))
+            edit.append(B("📸", "Capture d'écran / vidéo", lambda: self.action.emit("capture")))
         self.sections = [modes, tools, colors, edit]
         self._seps = []
         self.cols = 0
@@ -156,6 +156,7 @@ class Toolbar(QFrame):
             B("🖼️", "Bibliothèque d'images", lambda: self.action.emit("library")),
             B("☁️", "Nuage de mots (QR code élèves)", lambda: self.action.emit("cloud")),
             B("🧠", "Carte mentale", lambda: self.action.emit("mindmap")),
+            B("📸", "Capture d'écran / vidéo avec éditeur", lambda: self.action.emit("capture")),
             B("⚙️", "Panneau de contrôle", self.panel_requested.emit)])
         if kind == "board":
             self.page_lbl = QLabel("Page 1 / 1")
@@ -172,7 +173,7 @@ class Toolbar(QFrame):
                                  B("📄", "Exporter en PDF", lambda: self.action.emit("pdf"))])
         else:
             section("ÉCRAN", [B("❄️", "Figer / libérer l'écran", lambda: self.action.emit("freeze")),
-                              B("📸", "Capture (Documents/TBI Pro)", lambda: self.action.emit("capture"))])
+                              B("📸", "Capture d'écran / vidéo", lambda: self.action.emit("capture"))])
         self.more.hide()
 
         # ------------------------------------------------ onglet (barre masquée)

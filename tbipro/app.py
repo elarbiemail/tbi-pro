@@ -53,6 +53,7 @@ class Controller(QObject):
         for w in (self.board, self.overlay, self.floater):
             w.mode_requested.connect(self.set_mode)
             w.panel_requested.connect(self.show_panel)
+        self.floater.capture_requested.connect(self.capture_from_mouse_mode)
         p = self.panel
         p.mode_requested.connect(self.set_mode)
         p.calibrate_requested.connect(self.calibrate)
@@ -329,6 +330,12 @@ class Controller(QObject):
             self.floater.hide()
             self.board.show_on(self.screen)
         self.panel.set_mode(mode)
+
+    def capture_from_mouse_mode(self):
+        """Capture en mode souris : l'image peut être insérée dans le tableau blanc."""
+        from .ui.capture import CaptureController
+        self._capture = CaptureController(self.screen, self.board.canvas, None, hide=(self.floater,))
+        self._capture.run()
 
     def show_panel(self):
         if self.panel.screen() is self.screen and self.mode != "souris":
