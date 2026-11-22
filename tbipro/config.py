@@ -44,6 +44,7 @@ DEFAULTS = {
     "off_frames": 3,
     "pointer": "led",           # "led" (stylet à LED) ou "doigt" (index de la main)
     "finger_click": "pincer",   # mode doigt : "pincer" (pouce + index) ou "maintien" (doigt immobile)
+    "hand_crop": True,          # mode doigt : recadrer sur la projection avant la détection
     "color_pens": True,         # identifier les stylets par la couleur de leur LED
     "max_pens": 4,
     "laser": False,             # mode souris : clic par maintien au lieu de LED = clic

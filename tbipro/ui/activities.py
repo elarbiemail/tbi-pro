@@ -503,3 +503,241 @@ class MindmapDialog(QDialog):
         if it:
             self.canvas.add_item(it)
         self.accept()
+
+
+# ============================================================================
+# Tirage au sort (élèves) et dé
+# ============================================================================
+class PickerDialog(QDialog):
+    def __init__(self, parent=None, screen=None):
+        super().__init__(parent)
+        import os
+        from ..config import app_dir
+        self.path = os.path.join(app_dir(), "eleves.txt")
+        self.setWindowTitle("Tirage au sort")
+        self.setStyleSheet(DIALOG_CSS + """
+            QLabel#big { font: 800 72px "Segoe UI"; color: #fde68a; }
+            QLabel#info { color:#94a3b8; font-size:11pt; }
+            QPlainTextEdit { font-size: 14pt; }""")
+        root = QHBoxLayout(self)
+        left = QVBoxLayout()
+        root.addLayout(left, 1)
+        t = QLabel("🎲 Tirage au sort")
+        t.setObjectName("title")
+        left.addWidget(t)
+        info = QLabel("Liste des élèves (un nom par ligne). Elle est gardée pour la prochaine fois.")
+        info.setObjectName("info")
+        info.setWordWrap(True)
+        left.addWidget(info)
+        self.edit = QPlainTextEdit()
+        try:
+            self.edit.setPlainText(open(self.path, encoding="utf-8").read())
+        except OSError:
+            self.edit.setPlainText("Amine\nSalma\nYoussef\nKhadija\nOmar\nFatima Zahra")
+        left.addWidget(self.edit, 1)
+        kb = QPushButton("⌨️ Clavier")
+        kb.clicked.connect(lambda: self._kb())
+        left.addWidget(kb)
+        right = QVBoxLayout()
+        root.addLayout(right, 1)
+        self.big = QLabel("?")
+        self.big.setObjectName("big")
+        self.big.setAlignment(Qt.AlignCenter)
+        self.big.setWordWrap(True)
+        self.big.setMinimumHeight(260)
+        self.big.setStyleSheet("background:#1e293b;border-radius:18px;")
+        right.addWidget(self.big, 1)
+        self.history = QLabel("")
+        self.history.setObjectName("info")
+        self.history.setWordWrap(True)
+        right.addWidget(self.history)
+        row = QHBoxLayout()
+        self.no_repeat = QPushButton("Sans remise : OUI")
+        self.no_repeat.clicked.connect(self._toggle_rep)
+        self.avoid = True
+        row.addWidget(self.no_repeat)
+        reset = QPushButton("⟲ Réinitialiser")
+        reset.clicked.connect(self._reset)
+        row.addWidget(reset)
+        right.addLayout(row)
+        row = QHBoxLayout()
+        go = QPushButton("🎯 Tirer un élève")
+        go.setObjectName("ok")
+        go.clicked.connect(self.draw_name)
+        dice = QPushButton("🎲 Lancer le dé")
+        dice.clicked.connect(self.roll)
+        row.addWidget(go, 2)
+        row.addWidget(dice, 1)
+        right.addLayout(row)
+        close = QPushButton("✖ Fermer")
+        close.setObjectName("cancel")
+        close.clicked.connect(self.accept)
+        right.addWidget(close)
+        self.drawn = []
+        self.anim = QTimer(self, interval=70, timeout=self._spin)
+        self.spin_left = 0
+        projected_dialog(self, screen, size=(1200, 700))
+
+    def _kb(self):
+        d = QDialog(self)
+        d.setStyleSheet(DIALOG_CSS)
+        v = QVBoxLayout(d)
+        v.addWidget(VirtualKeyboard(self.edit))
+        b = QPushButton("OK")
+        b.setObjectName("ok")
+        b.clicked.connect(d.accept)
+        v.addWidget(b)
+        projected_dialog(d, self.screen(), size=(1000, 420))
+        d.exec()
+
+    def names(self):
+        return [n.strip() for n in self.edit.toPlainText().splitlines() if n.strip()]
+
+    def _toggle_rep(self):
+        self.avoid = not self.avoid
+        self.no_repeat.setText("Sans remise : " + ("OUI" if self.avoid else "NON"))
+
+    def _reset(self):
+        self.drawn = []
+        self.history.setText("")
+        self.big.setText("?")
+
+    def draw_name(self):
+        pool = [n for n in self.names() if not (self.avoid and n in self.drawn)]
+        if not pool:
+            self.big.setText("Tout le monde\na été tiré !")
+            return
+        self.pool = pool
+        self.final = random.choice(pool)
+        self.spin_left = 18
+        self.anim.start()
+
+    def _spin(self):
+        self.spin_left -= 1
+        if self.spin_left <= 0:
+            self.anim.stop()
+            self.big.setText(self.final)
+            self.drawn.append(self.final)
+            self.history.setText("Déjà tirés : " + ", ".join(self.drawn))
+            return
+        self.big.setText(random.choice(self.pool))
+
+    def roll(self):
+        faces = "⚀⚁⚂⚃⚄⚅"
+        self.final = random.choice(faces)
+        self.pool = list(faces)
+        self.spin_left = 12
+        self.anim.start()
+
+    def done(self, r):
+        try:
+            with open(self.path, "w", encoding="utf-8") as f:
+                f.write(self.edit.toPlainText())
+        except OSError:
+            pass
+        super().done(r)
+
+
+# ============================================================================
+# Gestion des pages (aperçus)
+# ============================================================================
+class PagesDialog(QDialog):
+    def __init__(self, canvas, parent=None, screen=None):
+        super().__init__(parent)
+        from PySide6.QtWidgets import QScrollArea, QToolButton
+        from PySide6.QtCore import QSize
+        from PySide6.QtGui import QIcon
+        self.QToolButton, self.QIcon, self.QSize = QToolButton, QIcon, QSize
+        self.canvas = canvas
+        self.sel = canvas.index
+        self.setWindowTitle("Pages")
+        self.setStyleSheet(DIALOG_CSS + """
+            QToolButton { background:#1e293b; border:3px solid transparent; border-radius:12px; color:#e2e8f0;
+                          font-size:12pt; }
+            QToolButton[sel="true"] { border-color:#38bdf8; }
+            QScrollBar:vertical { width:30px; }""")
+        v = QVBoxLayout(self)
+        t = QLabel("🗂️ Pages du tableau — touchez une page pour la sélectionner")
+        t.setObjectName("title")
+        v.addWidget(t)
+        area = QScrollArea()
+        area.setWidgetResizable(True)
+        self.holder = QWidget()
+        self.grid = QGridLayout(self.holder)
+        self.grid.setAlignment(Qt.AlignTop | Qt.AlignLeft)
+        area.setWidget(self.holder)
+        v.addWidget(area, 1)
+        row = QHBoxLayout()
+        for text, fn in [("👁️ Afficher", self.open_page), ("⧉ Dupliquer", self.dup), ("⬅️ Avancer", lambda: self.move(-1)),
+                         ("➡️ Reculer", lambda: self.move(1)), ("🗑️ Supprimer", self.delete), ("✖ Fermer", self.accept)]:
+            b = QPushButton(text)
+            if text.startswith("👁"):
+                b.setObjectName("ok")
+            if text.startswith("✖"):
+                b.setObjectName("cancel")
+            b.clicked.connect(lambda _=False, fn=fn: fn())
+            row.addWidget(b)
+        v.addLayout(row)
+        projected_dialog(self, screen, full=True)
+        self.fill()
+
+    def fill(self):
+        g = self.grid
+        while g.count():
+            g.takeAt(0).widget().deleteLater()
+        cols = max(2, (self.width() - 80) // 300)
+        self.btns = []
+        for i in range(len(self.canvas.pages)):
+            b = self.QToolButton()
+            b.setToolButtonStyle(Qt.ToolButtonTextUnderIcon)
+            b.setIcon(self.QIcon(QPixmap.fromImage(self.canvas.page_thumbnail(i, 260))))
+            b.setIconSize(self.QSize(260, 160))
+            b.setText(f"Page {i + 1}")
+            b.setFixedSize(286, 210)
+            b.setProperty("sel", i == self.sel)
+            b.clicked.connect(lambda _=False, i=i: self.pick(i))
+            g.addWidget(b, i // cols, i % cols)
+            self.btns.append(b)
+
+    def pick(self, i):
+        self.sel = i
+        for j, b in enumerate(self.btns):
+            b.setProperty("sel", j == i)
+            b.style().unpolish(b)
+            b.style().polish(b)
+
+    def open_page(self):
+        self.canvas.go_page(self.sel)
+        self.accept()
+
+    def dup(self):
+        import copy
+        c = self.canvas
+        pg = c.pages[self.sel]
+        new = {k: (copy.copy(v) if k == "items" else v) for k, v in pg.items() if not k.startswith("_")}
+        new["items"] = list(pg["items"])
+        new["undo"], new["redo"] = [], []
+        c.pages.insert(self.sel + 1, new)
+        self.sel += 1
+        self.fill()
+
+    def move(self, d):
+        c = self.canvas
+        j = self.sel + d
+        if 0 <= j < len(c.pages):
+            c.pages[self.sel], c.pages[j] = c.pages[j], c.pages[self.sel]
+            self.sel = j
+            self.fill()
+
+    def delete(self):
+        c = self.canvas
+        if len(c.pages) <= 1:
+            return
+        del c.pages[self.sel]
+        self.sel = min(self.sel, len(c.pages) - 1)
+        c.index = min(c.index, len(c.pages) - 1)
+        self.fill()
+
+    def done(self, r):
+        self.canvas.invalidate()
+        super().done(r)

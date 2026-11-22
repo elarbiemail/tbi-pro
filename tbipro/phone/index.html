@@ -70,7 +70,7 @@ const video = $("v"), ov = $("ov"), octx = ov.getContext("2d");
 const work = $("work"), wctx = work.getContext("2d", { willReadFrequently: true });
 
 // Paramètres envoyés par le PC
-let cfg = { thr: 225, minA: 2, maxA: 400, roi: null, mode: "led", model: false };
+let cfg = { thr: 225, minA: 2, maxA: 400, roi: null, mode: "led", model: false, crop: true };
 let hand = null, handLoading = false, handError = "", pinch = {}, lastMode = "led";
 let ws = null, track = null, lastBlobs = [], frames = 0, fpsT = performance.now();
 let snapWanted = false, lastPreview = 0, dimmed = false;
@@ -86,7 +86,7 @@ function connect() {
   ws.onmessage = ev => {
     let m; try { m = JSON.parse(ev.data); } catch (e) { return; }
     if (m.t === "cfg") {
-      cfg = { thr: m.thr, minA: m.minA, maxA: m.maxA, roi: m.roi, mode: m.mode || "led", model: !!m.model };
+      cfg = { thr: m.thr, minA: m.minA, maxA: m.maxA, roi: m.roi, mode: m.mode || "led", model: !!m.model, crop: m.crop !== false };
       if (cfg.mode !== lastMode) { lastMode = cfg.mode; onModeChange(); }
     }
     else if (m.t === "snap") { snapWanted = true; }
@@ -112,7 +112,7 @@ async function startCamera() {
   try {
     const stream = await navigator.mediaDevices.getUserMedia({
       audio: false,
-      video: { facingMode: { ideal: "environment" }, width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 60, min: 24 } }
+      video: { facingMode: { ideal: "environment" }, width: { ideal: 1920 }, height: { ideal: 1080 }, frameRate: { ideal: 60, min: 24 } }
     });
     video.srcObject = stream;
     track = stream.getVideoTracks()[0];
@@ -261,7 +261,8 @@ async function loadHand() {
     const { FilesetResolver, HandLandmarker } = await import("/mp/vision_bundle.mjs");
     const files = await FilesetResolver.forVisionTasks("/mp/wasm");
     const opts = d => ({ baseOptions: { modelAssetPath: "/mp/hand_landmarker.task", delegate: d },
-                         runningMode: "VIDEO", numHands: 2, minHandDetectionConfidence: 0.5, minTrackingConfidence: 0.5 });
+                         runningMode: "VIDEO", numHands: 2, minHandDetectionConfidence: 0.55,
+                         minHandPresenceConfidence: 0.55, minTrackingConfidence: 0.6 });
     try { hand = await HandLandmarker.createFromOptions(files, opts("GPU")); }
     catch (e) { hand = await HandLandmarker.createFromOptions(files, opts("CPU")); }
     setStatus("Connecté au PC — mode doigt", "ok");
@@ -272,20 +273,47 @@ async function loadHand() {
   handLoading = false;
 }
 let lastTs = 0;
+const hcan = document.createElement("canvas"), hctx = hcan.getContext("2d");
+// Zoom sur la projection : on ne donne au modèle que la zone utile, agrandie → doigt plus précis
+function cropBox(vw, vh) {
+  if (!cfg.crop || !cfg.roi) return [0, 0, vw, vh];
+  let x0 = 1, y0 = 1, x1 = 0, y1 = 0;
+  cfg.roi.forEach(p => { x0 = Math.min(x0, p[0]); y0 = Math.min(y0, p[1]); x1 = Math.max(x1, p[0]); y1 = Math.max(y1, p[1]); });
+  const mx = (x1 - x0) * 0.12, my = (y1 - y0) * 0.12;
+  x0 = Math.max(0, x0 - mx); y0 = Math.max(0, y0 - my); x1 = Math.min(1, x1 + mx); y1 = Math.min(1, y1 + my);
+  if ((x1 - x0) * (y1 - y0) > 0.8) return [0, 0, vw, vh];
+  return [Math.round(x0 * vw), Math.round(y0 * vh), Math.max(16, Math.round((x1 - x0) * vw)), Math.max(16, Math.round((y1 - y0) * vh))];
+}
 function detectHands() {
   if (!hand) { loadHand(); return []; }
   let ts = performance.now(); if (ts <= lastTs) ts = lastTs + 1; lastTs = ts;
-  const res = hand.detectForVideo(video, ts);
+  const vw = video.videoWidth, vh = video.videoHeight;
+  const [cx, cy, cw, ch] = cropBox(vw, vh);
+  let src = video;
+  if (cw !== vw || ch !== vh) {
+    const f = Math.min(2.5, Math.max(1, 960 / cw));       // agrandir la zone utile
+    hcan.width = Math.round(cw * f); hcan.height = Math.round(ch * f);
+    hctx.imageSmoothingQuality = "high";
+    hctx.drawImage(video, cx, cy, cw, ch, 0, 0, hcan.width, hcan.height);
+    src = hcan;
+  }
+  const res = hand.detectForVideo(src, ts);
   const out = [];
   const roi = cfg.roi ? expand(cfg.roi, 0.08) : null;
   (res.landmarks || []).forEach((lm, i) => {
     const label = (res.handedness && res.handedness[i] && res.handedness[i][0]) ? res.handedness[i][0].categoryName : String(i);
-    const d = (a, b) => Math.hypot(lm[a].x - lm[b].x, lm[a].y - lm[b].y);
-    const ratio = d(4, 8) / Math.max(d(0, 9), 1e-6);
     let p = pinch[label] || false;
-    if (p && ratio > 0.42) p = false; else if (!p && ratio < 0.30) p = true;   // hystérésis
+    const wl = res.worldLandmarks && res.worldLandmarks[i];
+    if (wl) {                                                // distance pouce-index en mètres (3D)
+      const m = Math.hypot(wl[4].x - wl[8].x, wl[4].y - wl[8].y, wl[4].z - wl[8].z);
+      if (p && m > 0.045) p = false; else if (!p && m < 0.030) p = true;
+    } else {
+      const d = (a, b) => Math.hypot(lm[a].x - lm[b].x, lm[a].y - lm[b].y);
+      const ratio = d(4, 8) / Math.max(d(0, 9), 1e-6);
+      if (p && ratio > 0.42) p = false; else if (!p && ratio < 0.30) p = true;
+    }
     pinch[label] = p;
-    const x = lm[8].x, y = lm[8].y;                                            // bout de l'index
+    const x = (cx + lm[8].x * cw) / vw, y = (cy + lm[8].y * ch) / vh;   // bout de l'index, repère image complète
     if (roi && !pointInPoly(x, y, roi)) return;
     out.push([+x.toFixed(5), +y.toFixed(5), 0, "doigt", p ? 1 : 0]);
   });

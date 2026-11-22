@@ -151,7 +151,8 @@ class Controller(QObject):
     def apply_params(self):
         c = self.cfg
         self.source.set_params(threshold=c["threshold"], min_area=c["min_area"], max_area=c["max_area"],
-                               roi=None if self.calib else c.get("roi"), mode=c.get("pointer", "led"))
+                               roi=None if self.calib else c.get("roi"), mode=c.get("pointer", "led"),
+                               crop=bool(c.get("hand_crop", True)))
         self.save_timer.start()
 
     def relearn_ir(self):
@@ -339,8 +340,11 @@ class Controller(QObject):
     # ------------------------------------------------------------------ interface
     def refresh_ui(self):
         p = self.panel
-        p.status_lbl.setText(self.source.status())
+        st = self.source.status()
+        p.status_lbl.setText(st)
         p.calib_lbl.setText("✅ Calibré" if self.H is not None else "⚠️ Non calibré : lancez un calibrage")
+        p.chip_cam.setText(("🟢 Caméra " + f"{self.source.fps:.0f} img/s") if self.source.connected() else "🔴 Caméra en attente")
+        p.chip_cal.setText("🎯 Calibré" if self.H is not None else "⚠️ À calibrer")
         if p.isVisible() and not p.isMinimized():
             _, blobs, _ = self.source.latest()
             p.show_preview(self.source.preview(), blobs, None if self.calib else self.cfg.get("roi"))

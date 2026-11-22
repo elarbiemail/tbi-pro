@@ -66,6 +66,7 @@ Dans le panneau de contrôle, section **« 3. Pointeur »**, choisissez **« Doi
 - Le modèle de détection de la main est inclus dans l'exécutable. En version « code source », il est téléchargé une seule fois (7 Mo) au premier usage.
 - Le mode doigt fonctionne avec le portable (QR code) et la webcam, pas avec la caméra infrarouge.
 - Conseil : tenez-vous de côté pour que la caméra voie bien votre main, sans la cacher avec votre corps.
+- **Précision** : après le calibrage, l'option « Zoomer sur la projection avant la détection » ne fait analyser que la zone utile de l'image, agrandie. Le pincement est mesuré en 3D (en centimètres réels), donc il reste fiable quelle que soit l'orientation de la main. Le réglage « Stabilisation du pointeur » supprime les tremblements à l'arrêt sans ralentir le tracé rapide.
 
 ---
 
@@ -139,26 +140,38 @@ Les réglages et le calibrage sont enregistrés : au prochain lancement, tout es
 
 ---
 
-## 5. La barre d'outils (Annoter et Tableau)
+## 5. La barre latérale (Annoter et Tableau)
+
+La barre se **masque toute seule** après quelques secondes sans être touchée : il reste un petit onglet **☰** au bord de l'écran. Touchez-le pour la faire revenir. **📌** épingle la barre (elle ne se masque plus), **⇆** la passe de l'autre côté, **«** la masque tout de suite.
+
+**Barre principale (outils les plus utilisés)**
 
 | Bouton | Action |
 |---|---|
-| ☰ / ⇆ | Réduire la barre / la passer à droite ou à gauche |
-| 🖱️ 🖊️ 📋 ⚙️ | Mode souris / annoter / tableau / panneau de contrôle |
-| ✏️ 🖍️ 🧽 ✋ | Stylo, surligneur, gomme (efface les traits touchés), déplacer un élément |
-| ╱ ➚ ▭ ◯ | Ligne, flèche, rectangle, ellipse |
-| 🔤 🧭 | Texte, compas |
-| 📏 📐 ◠ 🖼️ ⏱️ ☁️ 🧠 | Règle, équerre, rapporteur, bibliothèque d'images, minuteur, nuage de mots, carte mentale |
-| Couleurs, • ● ⬤ | Couleur et épaisseur **du stylet qui touche la barre** |
+| 🖱️ 🖊️/📋 | Mode souris / annotation / tableau |
+| ⋯ | Ouvre le panneau **Plus** (voir ci-dessous) |
+| 🖐️ | **Sélection** : touchez un objet pour le sélectionner. Ensuite, glisser = déplacer, **coins** = agrandir / réduire, **⟳** = pivoter (aimanté tous les 15°). Barre d'actions sous l'objet : 🗑 supprimer, ⧉ dupliquer, ⬆ premier plan, ⬇ arrière-plan, ✏ modifier le texte, ◧ plein / vide. Toucher une couleur recolore l'objet sélectionné. Cela marche pour **tous les objets** : traits, formes, textes, images, cartes mentales, nuages de mots. |
+| ✏️ 🖍️ 🧽 | Stylo, surligneur, gomme |
+| ✍️ | **Écriture → texte** : écrivez à la main. Une seconde et demie après le dernier trait, l'écriture est reconnue (en français) et remplacée par du texte tapé, à la même taille. Nécessite Internet. |
+| 🪄 | **Stylo de formes** : dessinez à main levée un cercle, une ellipse, un rectangle, un carré, un triangle, un polygone, une ligne ou une flèche, qui est remplacé par une forme nette. Fonctionne sans Internet. |
+| 🔤 | Texte au clavier virtuel |
+| ╱ ➚ ▭ ◯ △ ☆ | Ligne, flèche, rectangle, ellipse, triangle, étoile |
+| Couleurs, 🎨 | 8 couleurs + **toutes les couleurs** (nuancier) |
+| • ● ⬤, ◧ | Épaisseur ; formes **pleines** ou vides |
 | ↶ ↷ 🗑️ | Annuler, rétablir, effacer la page |
-| ▦ | Changer le fond : blanc → quadrillage → Seyès → lignes → ardoise → noir |
-| ◀ ▶ ➕ ❌ | Pages : précédente, suivante (en crée une à la fin), nouvelle, supprimer |
-| 💾 📂 📄 | Enregistrer, ouvrir, exporter en PDF |
-| ❄️ 📸 | (Annoter) Figer l'écran pour écrire dessus / capture d'écran |
-| ✖ | Revenir au mode souris |
+| ▶ / 📸 | Page suivante (tableau) / capture d'écran (annotation) |
 
-Les fichiers sont enregistrés dans **Documents\TBI Pro** : tableaux `.tbi` (réouvrables), PDF, et captures dans le sous-dossier `Captures`.
-Au clavier : **Échap** revient au mode souris ; flèches ←/→ pour changer de page ; Ctrl+Z / Ctrl+Y pour annuler / rétablir.
+**Panneau « ⋯ Plus »**
+
+| Rubrique | Contenu |
+|---|---|
+| Géométrie | 📏 règle, 📐 équerre, ◠ rapporteur, 🧭 compas |
+| Présenter | 🔦 **projecteur** (tout l'écran est assombri sauf un disque, déplaçable ; ◉ change sa taille), 🎭 **rideau** (cache le haut de l'écran, glissez pour dévoiler progressivement), ⏱️ minuteur, 🎲 **tirage au sort** (liste d'élèves mémorisée, avec ou sans remise, et dé) |
+| Ressources et activités | 🖼️ bibliothèque d'images, ☁️ nuage de mots, 🧠 carte mentale, ⚙️ panneau de contrôle |
+| Pages | ◀ ▶ ➕, 🗂️ **gestion des pages** (aperçus, afficher, dupliquer, réordonner, supprimer), ▦ **fonds** : blanc, quadrillage, Seyès, lignes, points, **papier millimétré**, **repère orthonormé**, **portées musicales**, ardoise, noir |
+| Fichiers | 💾 enregistrer, 📂 ouvrir, 📥 **importer un PDF** (chaque page devient une page du tableau sur laquelle on écrit ; pour un diaporama, exportez-le d'abord en PDF), 📄 exporter en PDF |
+
+Le tableau est **sauvegardé automatiquement** toutes les 2 minutes dans `Documents\TBI Pro\Sauvegardes automatiques`.
 
 ### Outils de classe
 
@@ -179,7 +192,11 @@ Au clavier : **Échap** revient au mode souris ; flèches ←/→ pour changer d
   - **ARASAAC** : pictogrammes éducatifs, recherche en français (licence CC BY-NC-SA, usage non commercial) ;
   - **Icônes couleur** : OpenMoji, Noto, Twemoji, Fluent (recherche plutôt en anglais) ;
   - **Openverse** : illustrations et photos sous licence Creative Commons ou domaine public ;
-  - **Wikimedia Commons** : photos, cartes, documents historiques.
+  - **Wikimedia Commons** : photos, cartes, documents historiques ;
+  - **Cartes et schémas** (Wikimedia) ;
+  - **Œuvres d'art du domaine public** (Metropolitan Museum of Art) ;
+  - **Icônes simples** monochromes (Material Design, Tabler, Phosphor, Carbon) ;
+  - **Drapeaux du monde** (environ 180 pays, recherche par nom en français).
 - **Mes ressources** : toutes les images déposées dans `Documents\TBI Pro\Ressources` (sous-dossiers compris), plus « Autre fichier… ».
 
 Touchez une vignette : l'image est insérée au centre de la page. Déplacez-la ensuite avec l'outil ✋. Quand la licence l'exige, le **crédit de l'auteur** est ajouté automatiquement sous l'image.

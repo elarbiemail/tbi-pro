@@ -154,13 +154,44 @@ def find_projection_quad(dark, light):
 # ----------------------------------------------------------------------------
 # Suivi multi-stylets
 # ----------------------------------------------------------------------------
+class OneEuro:
+    """
+    Filtre « One Euro » (Casiez et al., 2012) : très stable quand le pointeur bouge lentement
+    (on peut viser précisément), réactif quand il bouge vite (pas de retard en écrivant).
+    """
+
+    def __init__(self, min_cutoff=1.0, beta=0.015, d_cutoff=1.0):
+        self.min_cutoff, self.beta, self.d_cutoff = min_cutoff, beta, d_cutoff
+        self.x = self.dx = self.t = None
+
+    @staticmethod
+    def _alpha(cutoff, dt):
+        tau = 1.0 / (2 * math.pi * cutoff)
+        return 1.0 / (1.0 + tau / dt)
+
+    def __call__(self, x, t):
+        if self.x is None:
+            self.x, self.dx, self.t = x, 0.0, t
+            return x
+        dt = max(1e-3, t - self.t)
+        self.t = t
+        dx = (x - self.x) / dt
+        a_d = self._alpha(self.d_cutoff, dt)
+        self.dx = a_d * dx + (1 - a_d) * self.dx
+        cutoff = self.min_cutoff + self.beta * abs(self.dx)
+        a = self._alpha(cutoff, dt)
+        self.x = a * x + (1 - a) * self.x
+        return self.x
+
+
 class Track:
-    __slots__ = ("id", "key", "x", "y", "seen", "lost", "down", "pressed", "unpressed")
+    __slots__ = ("id", "key", "x", "y", "seen", "lost", "down", "pressed", "unpressed", "fx", "fy")
 
     def __init__(self, tid, key, x, y, pressed=True):
         self.id, self.key, self.x, self.y = tid, key, x, y
         self.seen, self.lost, self.down = 1, 0, False
         self.pressed, self.unpressed = pressed, 0
+        self.fx = self.fy = None
 
 
 class PenTracker:
@@ -189,6 +220,7 @@ class PenTracker:
         """points : liste de (x, y, couleur[, appuyé]) en pixels écran. Renvoie la liste d'événements."""
         c = self.cfg
         a = float(c.get("smoothing", 0.45))
+        now = time.time()
         events = []
         pts = [(p[0], p[1], p[2], bool(p[3]) if len(p) > 3 else True) for p in points][: int(c.get("max_pens", 4)) + 2]
         # appariement glouton par distance croissante (même couleur obligatoire si option active)
@@ -209,7 +241,13 @@ class PenTracker:
             used_p.add(pi)
             t = self.tracks[ti]
             x, y, _, pr = pts[pi]
-            t.x, t.y = a * t.x + (1 - a) * x, a * t.y + (1 - a) * y
+            if t.fx is None:
+                # stabilisation 0 → presque brut ; 0,95 → très stable à l'arrêt
+                mc = 0.05 + 4.0 * (1 - a) ** 2
+                t.fx, t.fy = OneEuro(mc, 0.012), OneEuro(mc, 0.012)
+                t.fx(t.x, now - 0.016)
+                t.fy(t.y, now - 0.016)
+            t.x, t.y = t.fx(x, now), t.fy(y, now)
             t.seen += 1
             t.lost = 0
             t.pressed = pr
@@ -309,7 +347,8 @@ def detect_blobs_ir(frame, background=None, threshold=200, min_area=2, max_area=
 # ----------------------------------------------------------------------------
 # Doigt : l'index de la main sert de pointeur (MediaPipe Hand Landmarker)
 # ----------------------------------------------------------------------------
-PINCH_ON, PINCH_OFF = 0.30, 0.42   # hystérésis : pouce-index rapprochés = appui
+PINCH_ON, PINCH_OFF = 0.30, 0.42        # hystérésis (rapport à la taille de la main)
+PINCH_ON_M, PINCH_OFF_M = 0.030, 0.045  # hystérésis en mètres (coordonnées 3D « monde » de MediaPipe)
 
 
 def pinch_ratio(lm):
@@ -323,12 +362,33 @@ class PinchState:
     def __init__(self):
         self.pressed = False
 
-    def update(self, ratio):
+    def update(self, ratio, metres=None):
+        if metres is not None:          # mesure 3D : indépendante de l'orientation de la main
+            if self.pressed and metres > PINCH_OFF_M:
+                self.pressed = False
+            elif not self.pressed and metres < PINCH_ON_M:
+                self.pressed = True
+            return self.pressed
         if self.pressed and ratio > PINCH_OFF:
             self.pressed = False
         elif not self.pressed and ratio < PINCH_ON:
             self.pressed = True
         return self.pressed
+
+
+def crop_box(roi, w, h, margin=0.12):
+    """Rectangle (pixels) englobant la projection + marge, pour zoomer avant la détection."""
+    if not roi:
+        return 0, 0, w, h
+    xs = [p[0] for p in roi]
+    ys = [p[1] for p in roi]
+    x0, x1, y0, y1 = min(xs), max(xs), min(ys), max(ys)
+    mx, my = (x1 - x0) * margin, (y1 - y0) * margin
+    x0, y0 = max(0.0, x0 - mx), max(0.0, y0 - my)
+    x1, y1 = min(1.0, x1 + mx), min(1.0, y1 + my)
+    if (x1 - x0) * (y1 - y0) > 0.8:      # la projection remplit déjà l'image
+        return 0, 0, w, h
+    return int(x0 * w), int(y0 * h), max(16, int((x1 - x0) * w)), max(16, int((y1 - y0) * h))
 
 
 class HandDetector:
@@ -340,15 +400,22 @@ class HandDetector:
         self.mp = mp
         opts = mpv.HandLandmarkerOptions(base_options=BaseOptions(model_asset_path=model_path),
                                          running_mode=mpv.RunningMode.VIDEO, num_hands=max_hands,
-                                         min_hand_detection_confidence=0.5, min_tracking_confidence=0.5)
+                                         min_hand_detection_confidence=0.55, min_hand_presence_confidence=0.55,
+                                         min_tracking_confidence=0.6)
         self.lm = mpv.HandLandmarker.create_from_options(opts)
         self.pinch = {}
         self.t0 = time.time()
         self.last_ts = -1
 
-    def detect(self, frame_bgr, roi=None):
+    def detect(self, frame_bgr, roi=None, crop=True):
         """→ liste de (x, y, 0, "doigt", appuyé) normalisés (bout de l'index)."""
-        rgb = np.ascontiguousarray(frame_bgr[:, :, ::-1])
+        H, W = frame_bgr.shape[:2]
+        x0, y0, cw, ch = crop_box(roi, W, H) if crop else (0, 0, W, H)
+        sub = frame_bgr[y0:y0 + ch, x0:x0 + cw]
+        if cw < 640:                                   # agrandir : la main est plus nette pour le modèle
+            f = 640 / cw
+            sub = cv2.resize(sub, (int(cw * f), int(ch * f)), interpolation=cv2.INTER_CUBIC)
+        rgb = np.ascontiguousarray(sub[:, :, ::-1])
         ts = int((time.time() - self.t0) * 1000)
         if ts <= self.last_ts:
             ts = self.last_ts + 1
@@ -356,12 +423,17 @@ class HandDetector:
         res = self.lm.detect_for_video(self.mp.Image(image_format=self.mp.ImageFormat.SRGB, data=rgb), ts)
         out = []
         poly = expand_poly(roi, 0.08) if roi else None
+        worlds = getattr(res, "hand_world_landmarks", None) or []
         for i, hand in enumerate(res.hand_landmarks or []):
             lm = [(p.x, p.y) for p in hand]
             label = res.handedness[i][0].category_name if res.handedness else str(i)
             st = self.pinch.setdefault(label, PinchState())
-            pressed = st.update(pinch_ratio(lm))
-            x, y = lm[8]
+            metres = None
+            if i < len(worlds):
+                w4, w8 = worlds[i][4], worlds[i][8]
+                metres = math.sqrt((w4.x - w8.x) ** 2 + (w4.y - w8.y) ** 2 + (w4.z - w8.z) ** 2)
+            pressed = st.update(pinch_ratio(lm), metres)
+            x, y = (x0 + lm[8][0] * cw) / W, (y0 + lm[8][1] * ch) / H
             if poly and not point_in_poly(x, y, poly):
                 continue
             out.append((x, y, 0, "doigt", pressed))

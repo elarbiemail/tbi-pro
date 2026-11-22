@@ -11,7 +11,7 @@ from PySide6.QtWidgets import QApplication, QFileDialog, QPushButton, QVBoxLayou
 
 from ..config import documents_dir
 from .. import vision
-from .activities import MindmapDialog, TimerPanel, WordCloudDialog
+from .activities import MindmapDialog, PagesDialog, PickerDialog, TimerPanel, WordCloudDialog
 from .canvas import InkCanvas
 from .keyboard import TextDialog
 from .library import LibraryDialog
@@ -25,6 +25,8 @@ class ToolsMixin:
         self.timer_panel = TimerPanel(self)
         self.canvas.text_requested.connect(
             lambda pos, key: QTimer.singleShot(0, lambda: self._ask_text(pos, key)))
+        self.canvas.edit_text_requested.connect(
+            lambda it: QTimer.singleShot(0, lambda: self._edit_text(it)))
 
     def _scr(self):
         return self.screen_ref or self.screen()
@@ -35,8 +37,30 @@ class ToolsMixin:
             self.canvas.add_text(pos, d.text(), key)
         self.raise_()
 
+    def _edit_text(self, it):
+        d = TextDialog("Modifier le texte", it.get("t", ""), self, self._scr())
+        if d.exec() and d.text().strip():
+            self.canvas.replace_text(it, d.text())
+        self.raise_()
+
+    def _pick_color(self):
+        from PySide6.QtWidgets import QColorDialog
+        from PySide6.QtGui import QColor
+        st = self.toolbar.state()
+        dlg = QColorDialog(QColor(st.color), self)
+        dlg.setOption(QColorDialog.ColorDialogOption.DontUseNativeDialog, True)
+        dlg.setWindowFlags(dlg.windowFlags() | Qt.WindowStaysOnTopHint)
+        if dlg.exec():
+            self.toolbar.set_color(dlg.selectedColor().name())
+
     def common_action(self, act):
-        if act == "library":
+        if act == "color":
+            self._pick_color()
+        elif act == "picker":
+            PickerDialog(self, self._scr()).exec()
+        elif act == "pages":
+            PagesDialog(self.canvas, self, self._scr()).exec()
+        elif act == "library":
             LibraryDialog(self.canvas, self, self._scr()).exec()
         elif act == "timer":
             self.timer_panel.toggle_visible()
@@ -86,6 +110,25 @@ class BoardWindow(ToolsMixin, ProjectedWindow):
         self.toolbar.action.connect(self.on_action)
         self.autosave_path = None
         self._setup_tools()
+        self._autosave_timer = QTimer(self, interval=120000, timeout=self._autosave)   # toutes les 2 minutes
+        self._autosave_timer.start()
+        self._autosave_sig = None
+
+    def _autosave(self):
+        """Sauvegarde automatique de sécurité dans Documents/TBI Pro/Sauvegardes automatiques."""
+        c = self.canvas
+        if not any(pg["items"] or pg.get("bgimg") for pg in c.pages):
+            return
+        sig = (len(c.pages), tuple(len(pg["items"]) for pg in c.pages), tuple(id(pg["items"]) for pg in c.pages))
+        if sig == self._autosave_sig:
+            return
+        self._autosave_sig = sig
+        d = os.path.join(documents_dir(), "Sauvegardes automatiques")
+        os.makedirs(d, exist_ok=True)
+        try:
+            c.save(os.path.join(d, "derniere_session.tbi"))
+        except Exception as e:
+            print("Sauvegarde automatique impossible :", e)
 
     def resizeEvent(self, e):
         self.canvas.setGeometry(self.rect())
@@ -128,6 +171,15 @@ class BoardWindow(ToolsMixin, ProjectedWindow):
                 c.load(path)
                 self.autosave_path = path
                 c.toast("Ouvert : " + os.path.basename(path))
+        elif act == "pdfimport":
+            path, _ = QFileDialog.getOpenFileName(self, "Importer un PDF", os.path.expanduser("~"),
+                                                  "Documents PDF (*.pdf)", options=self._dialog())
+            if path:
+                try:
+                    n = c.import_pdf(path)
+                    c.toast(f"{n} page(s) importée(s) : écrivez dessus !")
+                except Exception as e:
+                    c.toast(f"Import impossible : {e}")
         elif act == "image":
             path, _ = QFileDialog.getOpenFileName(self, "Insérer une image", os.path.expanduser("~"),
                                                   "Images (*.png *.jpg *.jpeg *.bmp *.gif *.webp)", options=self._dialog())

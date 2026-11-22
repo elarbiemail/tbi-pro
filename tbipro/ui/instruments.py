@@ -70,6 +70,10 @@ class Instrument:
         b = self.to_world(best[2], best[3])
         return (a[0], a[1], b[0], b[1])
 
+    def move_by(self, dx, dy):
+        self.x += dx
+        self.y += dy
+
     def to_dict(self):
         return {"kind": self.kind, "x": self.x, "y": self.y, "a": self.a}
 
@@ -235,3 +239,108 @@ def project_on_line(px, py, edge, offset):
     if n > 1e-6:
         qx, qy = qx + nx / n * offset, qy + ny / n * offset
     return qx, qy
+
+
+# ----------------------------------------------------------------------------
+# Projecteur (spot) et rideau : cacher / dévoiler une partie de l'écran
+# ----------------------------------------------------------------------------
+class Spotlight(Instrument):
+    """Assombrit tout l'écran sauf un disque : glisser dans le disque pour le déplacer, ◉ pour le rayon."""
+    kind = "projecteur"
+
+    def __init__(self, W, H):
+        super().__init__(W / 2, H / 2)
+        self.W, self.H, self.r = W, H, min(W, H) * 0.22
+
+    def move_by(self, dx, dy):
+        self.x = min(max(self.x + dx, 0), self.W)
+        self.y = min(max(self.y + dy, 0), self.H)
+
+    def resize_to(self, px, py):
+        self.r = max(50.0, min(max(self.W, self.H), math.hypot(px - self.x, py - self.y)))
+
+    def _handles_pos(self):
+        return (self.x + self.r * 0.7071, self.y + self.r * 0.7071), (self.x + self.r * 0.7071, self.y - self.r * 0.7071)
+
+    def hit(self, px, py):
+        rot, close = self._handles_pos()
+        if math.hypot(px - rot[0], py - rot[1]) <= HANDLE_R + 4:
+            return "rotate"
+        if math.hypot(px - close[0], py - close[1]) <= HANDLE_R:
+            return "close"
+        if math.hypot(px - self.x, py - self.y) <= self.r:
+            return "body"
+        return "block"           # zone sombre : on n'écrit pas dessous
+
+    def snap_edge(self, px, py):
+        return None
+
+    def paint(self, p):
+        path = QPainterPath()
+        path.addRect(QRectF(-10, -10, self.W + 20, self.H + 20))
+        hole = QPainterPath()
+        hole.addEllipse(QPointF(self.x, self.y), self.r, self.r)
+        p.save()
+        p.setPen(Qt.NoPen)
+        p.setBrush(QColor(2, 6, 23, 235))
+        p.drawPath(path.subtracted(hole))
+        p.setPen(QPen(QColor(250, 204, 21), 3))
+        p.setBrush(Qt.NoBrush)
+        p.drawEllipse(QPointF(self.x, self.y), self.r, self.r)
+        rot, close = self._handles_pos()
+        p.setFont(QFont("Segoe UI Symbol", 14, QFont.Bold))
+        for (hx, hy), txt, col in ((rot, "◉", QColor(14, 116, 144)), (close, "×", QColor(185, 28, 28))):
+            p.setPen(QPen(col, 2))
+            p.setBrush(QColor(255, 255, 255, 235))
+            p.drawEllipse(QPointF(hx, hy), HANDLE_R, HANDLE_R)
+            p.drawText(QRectF(hx - HANDLE_R, hy - HANDLE_R, 2 * HANDLE_R, 2 * HANDLE_R), Qt.AlignCenter, txt)
+        p.restore()
+
+
+class Curtain(Instrument):
+    """Rideau qui cache le haut de l'écran : glisser vers le bas pour dévoiler… ou vers le haut."""
+    kind = "rideau"
+    BAR = 46
+
+    def __init__(self, W, H):
+        super().__init__(0, H * 0.75)
+        self.W, self.H = W, H
+
+    def move_by(self, dx, dy):
+        self.y = min(max(self.y + dy, self.BAR), self.H)
+
+    def hit(self, px, py):
+        if math.hypot(px - (self.W - 40), py - (self.y - self.BAR / 2)) <= HANDLE_R:
+            return "close"
+        if py <= self.y:
+            return "body"
+        return None
+
+    def snap_edge(self, px, py):
+        return None
+
+    def paint(self, p):
+        p.save()
+        p.setPen(Qt.NoPen)
+        p.setBrush(QColor(30, 41, 59))
+        p.drawRect(QRectF(0, 0, self.W, self.y))
+        p.setPen(QPen(QColor(51, 65, 85), 1))
+        for x in range(0, int(self.W), 36):                 # plis du rideau
+            p.drawLine(QPointF(x, 0), QPointF(x, self.y - self.BAR))
+        bar = QRectF(0, self.y - self.BAR, self.W, self.BAR)
+        p.setPen(Qt.NoPen)
+        p.setBrush(QColor(14, 116, 144))
+        p.drawRect(bar)
+        p.setPen(QColor("white"))
+        p.setFont(QFont("Segoe UI", 13, QFont.Bold))
+        p.drawText(bar, Qt.AlignCenter, "⇕  Glisser pour cacher / dévoiler")
+        cx, cy = self.W - 40, self.y - self.BAR / 2
+        p.setBrush(QColor(255, 255, 255, 235))
+        p.setPen(QPen(QColor(185, 28, 28), 2))
+        p.drawEllipse(QPointF(cx, cy), HANDLE_R - 2, HANDLE_R - 2)
+        p.setFont(QFont("Segoe UI Symbol", 14, QFont.Bold))
+        p.drawText(QRectF(cx - HANDLE_R, cy - HANDLE_R, 2 * HANDLE_R, 2 * HANDLE_R), Qt.AlignCenter, "×")
+        p.restore()
+
+
+KINDS.update({"projecteur": Spotlight, "rideau": Curtain})

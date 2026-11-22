@@ -1,129 +1,212 @@
 # -*- coding: utf-8 -*-
-"""Barre d'outils flottante, à gros boutons utilisables au stylet."""
-from PySide6.QtCore import QPoint, Qt, Signal
+"""
+Barre latérale à masquage automatique, utilisable au stylet / au doigt.
+
+  • Barre principale : les outils les plus utilisés (modes, sélection, stylos, gomme,
+    écriture→texte, formes, couleurs, épaisseurs, annuler/rétablir…).
+  • Panneau « ⋯ Plus » : instruments, projecteur/rideau, bibliothèque, activités, pages, fichiers.
+  • Sans interaction pendant quelques secondes, la barre se replie en un petit onglet
+    au bord de l'écran (📌 pour l'épingler).
+"""
+from PySide6.QtCore import QPoint, Qt, QTimer, Signal
 from PySide6.QtGui import QColor
-from PySide6.QtWidgets import QFrame, QGridLayout, QLabel, QPushButton, QSizePolicy, QVBoxLayout, QWidget
+from PySide6.QtWidgets import (QFrame, QGraphicsDropShadowEffect, QGridLayout, QHBoxLayout, QLabel, QPushButton,
+                               QVBoxLayout, QWidget)
 
-from .canvas import PALETTE, WIDTHS
+from .canvas import FILLABLE, PALETTE, WIDTHS
 
-BTN = 54
+BTN = 52
+AUTOHIDE_MS = 9000
 
 STYLE = """
-QFrame#tb { background: rgba(15,23,42,235); border-radius: 14px; }
-QPushButton { background: #1e293b; color: #f1f5f9; border: 2px solid transparent; border-radius: 10px;
-              font: 600 20px "Segoe UI Emoji","Segoe UI",sans-serif; }
+QFrame#tb, QFrame#more { background: qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 rgba(15,23,42,240), stop:1 rgba(30,27,75,240));
+                          border: 1px solid rgba(125,211,252,0.25); border-radius: 18px; }
+QPushButton { background: rgba(30,41,59,0.95); color: #f1f5f9; border: 2px solid transparent; border-radius: 12px;
+              font: 600 19px "Segoe UI Emoji","Segoe UI",sans-serif; }
+QPushButton:hover { border-color: rgba(56,189,248,0.6); }
 QPushButton:pressed, QPushButton[down="true"] { background: #334155; }
-QPushButton[sel="true"] { border-color: #38bdf8; background: #0c4a6e; }
-QPushButton[mode="true"] { font-size: 13px; }
-QLabel { color: #cbd5e1; font: 600 12px "Segoe UI",sans-serif; }
+QPushButton[sel="true"] { border-color: #38bdf8; background: qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 #075985, stop:1 #4c1d95); }
+QPushButton#small { font-size: 15px; background: transparent; }
+QLabel { color: #cbd5e1; font: 600 11px "Segoe UI",sans-serif; }
+QLabel#section { color: #7dd3fc; font: 700 11px "Segoe UI"; padding-top: 4px; }
 """
 
-TOOLS = [("pen", "✏️", "Stylo"), ("marker", "🖍️", "Surligneur"), ("eraser", "🧽", "Gomme"), ("move", "✋", "Déplacer"),
-         ("line", "╱", "Ligne"), ("arrow", "➚", "Flèche"), ("rect", "▭", "Rectangle"), ("ellipse", "◯", "Ellipse"),
-         ("text", "🔤", "Texte (clavier virtuel)"), ("compass", "🧭", "Compas : appuyer au centre, glisser pour le rayon")]
+TAB_STYLE = ("QPushButton{background:qlineargradient(x1:0,y1:0,x2:1,y2:1,stop:0 #0284c7,stop:1 #7c3aed);color:white;"
+             "border-radius:14px;font:700 22px 'Segoe UI Emoji','Segoe UI';border:2px solid rgba(255,255,255,0.5);}"
+             "QPushButton:pressed{background:#0c4a6e;}")
+
+PRIMARY_TOOLS = [("select", "🖐️", "Sélection : déplacer, agrandir, pivoter, dupliquer, supprimer"),
+                 ("pen", "✏️", "Stylo"), ("marker", "🖍️", "Surligneur"), ("eraser", "🧽", "Gomme"),
+                 ("handwrite", "✍️", "Écriture → texte (reconnaissance de l'écriture manuscrite)"),
+                 ("magic", "🪄", "Stylo de formes : cercle, rectangle, triangle, ligne, flèche reconnus"),
+                 ("text", "🔤", "Texte (clavier virtuel)"),
+                 ("line", "╱", "Ligne"), ("arrow", "➚", "Flèche"), ("rect", "▭", "Rectangle"),
+                 ("ellipse", "◯", "Ellipse / cercle"), ("triangle", "△", "Triangle"), ("star", "☆", "Étoile")]
+
+
+def _shadow(w):
+    eff = QGraphicsDropShadowEffect(w)
+    eff.setBlurRadius(28)
+    eff.setOffset(0, 6)
+    eff.setColor(QColor(0, 0, 0, 150))
+    w.setGraphicsEffect(eff)
 
 
 class Toolbar(QFrame):
     mode_requested = Signal(str)       # "souris", "annoter", "tableau"
     panel_requested = Signal()
-    action = Signal(str)               # actions qui demandent la fenêtre hôte (fichiers, capture…)
+    action = Signal(str)               # actions demandant la fenêtre hôte
 
     def __init__(self, canvas, kind, parent=None):
         super().__init__(parent)
         self.setObjectName("tb")
         self.setStyleSheet(STYLE)
+        _shadow(self)
         self.canvas, self.kind = canvas, kind
         self.active_key = "souris"     # stylet qui a touché la barre en dernier
-        self.collapsed = False
         self.side = "left"
+        self.pinned = False
         self.tool_btns, self.color_btns, self.width_btns = {}, {}, {}
+        self.page_lbl = None
 
+        # ------------------------------------------------ barre principale
         outer = QVBoxLayout(self)
         outer.setContentsMargins(8, 8, 8, 8)
         outer.setSpacing(6)
-        top = QGridLayout()
-        top.setSpacing(6)
-        self.btn_fold = self._btn("☰", "Réduire / déplier la barre", self.toggle_fold)
-        self.btn_side = self._btn("⇆", "Changer de côté", self.toggle_side)
-        top.addWidget(self.btn_fold, 0, 0)
-        top.addWidget(self.btn_side, 0, 1)
+        top = QHBoxLayout()
+        top.setSpacing(4)
+        self.btn_pin = self._btn("📌", "Épingler la barre (ne plus la masquer)", self.toggle_pin, small=True)
+        top.addWidget(self.btn_pin)
+        top.addWidget(self._btn("⇆", "Changer de côté", self.toggle_side, small=True))
+        top.addWidget(self._btn("«", "Masquer la barre", self.hide_bar, small=True))
         outer.addLayout(top)
-
         self.body = QWidget()
         self.grid = QGridLayout(self.body)
         self.grid.setContentsMargins(0, 0, 0, 0)
         self.grid.setSpacing(6)
-        self.page_lbl = None
+        outer.addWidget(self.body)
+
         B = self._btn
-        sections = []
         modes = [B("🖱️", "Mode souris (piloter l'ordinateur)", lambda: self.mode_requested.emit("souris"))]
         if kind == "board":
             modes.append(B("🖊️", "Annoter l'écran", lambda: self.mode_requested.emit("annoter")))
         else:
             modes.append(B("📋", "Tableau blanc", lambda: self.mode_requested.emit("tableau")))
-        modes.append(B("⚙️", "Panneau de contrôle", self.panel_requested.emit))
-        sections.append(modes)
+        self.btn_more = B("⋯", "Plus d'outils : instruments, bibliothèque, activités, pages, fichiers", self.toggle_more)
+        modes.append(self.btn_more)
         tools = []
-        for t, icon, tip in TOOLS:
+        for t, icon, tip in PRIMARY_TOOLS:
             b = B(icon, tip, lambda t=t: self.set_tool(t))
             self.tool_btns[t] = b
             tools.append(b)
-        sections.append(tools)
         colors = []
         for c in PALETTE:
             b = B("", c, lambda c=c: self.set_color(c))
-            b.setStyleSheet(f"QPushButton{{background:{c};}} QPushButton[sel=\"true\"]{{border-color:#38bdf8;}}")
+            b.setStyleSheet(f"QPushButton{{background:{c};border:2px solid rgba(255,255,255,0.25);}}"
+                            f"QPushButton[sel=\"true\"]{{border:3px solid #38bdf8;}}")
             self.color_btns[c] = b
             colors.append(b)
+        colors.append(B("🎨", "Autre couleur…", lambda: self.action.emit("color")))
         for name, icon in [("fin", "•"), ("moyen", "●"), ("epais", "⬤")]:
             b = B(icon, f"Épaisseur {name}", lambda n=name: self.set_width(n))
             self.width_btns[name] = b
             colors.append(b)
-        sections.append(colors)
+        self.btn_fill = B("◧", "Formes pleines / vides", self.toggle_fill)
+        colors.append(self.btn_fill)
         edit = [B("↶", "Annuler", self._do(self.canvas.undo)), B("↷", "Rétablir", self._do(self.canvas.redo)),
                 B("🗑️", "Effacer la page", self._do(self.canvas.clear_page))]
-        sections.append([B("📏", "Règle (glisser pour déplacer, ⟳ pour tourner, tracer le long du bord)",
-                           self._do(lambda: self.canvas.toggle_instrument("regle"))),
-                         B("📐", "Équerre", self._do(lambda: self.canvas.toggle_instrument("equerre"))),
-                         B("◠", "Rapporteur", self._do(lambda: self.canvas.toggle_instrument("rapporteur"))),
-                         B("🖼️", "Bibliothèque d'images (pictogrammes, banques libres en ligne, mes ressources)",
-                           lambda: self.action.emit("library")),
-                         B("⏱️", "Chronomètre / minuteur", lambda: self.action.emit("timer")),
-                         B("☁️", "Nuage de mots (les élèves participent par QR code)", lambda: self.action.emit("cloud")),
-                         B("🧠", "Carte mentale", lambda: self.action.emit("mindmap"))])
         if kind == "board":
-            edit.append(B("▦", "Changer le fond", self._do(self.canvas.cycle_background)))
-            sections.append(edit)
-            self.page_lbl = QLabel("1 / 1")
-            self.page_lbl.setAlignment(Qt.AlignCenter)
-            sections.append([B("◀", "Page précédente", self._do(lambda: self.canvas.go_page(self.canvas.index - 1))),
-                             B("▶", "Page suivante (crée une page à la fin)", self._do(self._next_page)),
-                             B("➕", "Nouvelle page", self._do(self.canvas.add_page)),
-                             B("❌", "Supprimer la page", self._do(self.canvas.delete_page)),
-                             self.page_lbl])
-            sections.append([B("💾", "Enregistrer (Documents/TBI Pro)", lambda: self.action.emit("save")),
-                             B("📂", "Ouvrir un tableau", lambda: self.action.emit("open")),
-                             B("📄", "Exporter en PDF", lambda: self.action.emit("pdf"))])
+            edit.append(B("▶", "Page suivante (crée une page à la fin)", self._do(self._next_page)))
         else:
-            edit += [B("❄️", "Figer / libérer l'écran", lambda: self.action.emit("freeze")),
-                     B("📸", "Capture (Documents/TBI Pro)", lambda: self.action.emit("capture"))]
-            sections.append(edit)
-        sections.append([B("✖", "Quitter (mode souris)", lambda: self.mode_requested.emit("souris"))])
-        self.sections = sections
+            edit.append(B("📸", "Capture d'écran (Documents/TBI Pro)", lambda: self.action.emit("capture")))
+        self.sections = [modes, tools, colors, edit]
+        self._seps = []
         self.cols = 0
         self._layout(3)
-        outer.addWidget(self.body)
+
+        # ------------------------------------------------ panneau « Plus »
+        self.more = QFrame(parent)
+        self.more.setObjectName("more")
+        self.more.setStyleSheet(STYLE)
+        _shadow(self.more)
+        mv = QVBoxLayout(self.more)
+        mv.setContentsMargins(10, 10, 10, 10)
+        mv.setSpacing(4)
+
+        def section(title, items, cols=4):
+            lbl = QLabel(title)
+            lbl.setObjectName("section")
+            mv.addWidget(lbl)
+            g = QGridLayout()
+            g.setSpacing(6)
+            for i, w in enumerate(items):
+                g.addWidget(w, i // cols, i % cols)
+            mv.addLayout(g)
+
+        ins = lambda k: self._do(lambda: self.canvas.toggle_instrument(k))
+        compass = B("🧭", "Compas : appuyer au centre, glisser pour le rayon", lambda: self.set_tool("compass"))
+        self.tool_btns["compass"] = compass
+        section("GÉOMÉTRIE", [B("📏", "Règle", ins("regle")), B("📐", "Équerre", ins("equerre")),
+                              B("◠", "Rapporteur", ins("rapporteur")), compass])
+        section("PRÉSENTER", [B("🔦", "Projecteur (spot) : seule une zone reste visible", ins("projecteur")),
+                              B("🎭", "Rideau : cacher puis dévoiler progressivement", ins("rideau")),
+                              B("⏱️", "Minuteur / chronomètre", lambda: self.action.emit("timer")),
+                              B("🎲", "Tirage au sort (élèves, dé)", lambda: self.action.emit("picker"))])
+        section("RESSOURCES ET ACTIVITÉS", [
+            B("🖼️", "Bibliothèque d'images", lambda: self.action.emit("library")),
+            B("☁️", "Nuage de mots (QR code élèves)", lambda: self.action.emit("cloud")),
+            B("🧠", "Carte mentale", lambda: self.action.emit("mindmap")),
+            B("⚙️", "Panneau de contrôle", self.panel_requested.emit)])
+        if kind == "board":
+            self.page_lbl = QLabel("Page 1 / 1")
+            section("PAGES", [B("◀", "Page précédente", self._do(lambda: self.canvas.go_page(self.canvas.index - 1))),
+                              B("▶", "Page suivante", self._do(self._next_page)),
+                              B("➕", "Nouvelle page", self._do(self.canvas.add_page)),
+                              B("🗂️", "Gérer les pages (aperçus, réordonner, dupliquer)", lambda: self.action.emit("pages")),
+                              B("▦", "Changer le fond (Seyès, repère, millimétré…)", self._do(self.canvas.cycle_background)),
+                              B("❌", "Supprimer la page", self._do(self.canvas.delete_page))])
+            mv.addWidget(self.page_lbl)
+            section("FICHIERS", [B("💾", "Enregistrer (Documents/TBI Pro)", lambda: self.action.emit("save")),
+                                 B("📂", "Ouvrir un tableau", lambda: self.action.emit("open")),
+                                 B("📥", "Importer un PDF ou une présentation exportée en PDF", lambda: self.action.emit("pdfimport")),
+                                 B("📄", "Exporter en PDF", lambda: self.action.emit("pdf"))])
+        else:
+            section("ÉCRAN", [B("❄️", "Figer / libérer l'écran", lambda: self.action.emit("freeze")),
+                              B("📸", "Capture (Documents/TBI Pro)", lambda: self.action.emit("capture"))])
+        self.more.hide()
+
+        # ------------------------------------------------ onglet (barre masquée)
+        self.tab = QPushButton("☰", parent)
+        self.tab.setToolTip("Afficher la barre d'outils")
+        self.tab.setFixedSize(44, 96)
+        self.tab.setStyleSheet(TAB_STYLE)
+        self.tab.setFocusPolicy(Qt.NoFocus)
+        self.tab.clicked.connect(lambda _=False: self.show_bar())
+        self.tab.hide()
+
+        self.hide_timer = QTimer(self, singleShot=True, interval=AUTOHIDE_MS, timeout=self._auto_hide)
         self.canvas.changed.connect(self.refresh)
         self.refresh()
+        self.hide_timer.start()
 
     # -------------------------------------------------------------- construction
-    def _btn(self, text, tip, fn):
+    def _btn(self, text, tip, fn, small=False):
         b = QPushButton(text)
         b.setToolTip(tip)
-        b.setFixedSize(BTN, BTN)
+        if small:
+            b.setObjectName("small")
+            b.setFixedSize(38, 34)
+        else:
+            b.setFixedSize(BTN, BTN)
         b.setFocusPolicy(Qt.NoFocus)
-        b.clicked.connect(lambda _=False, f=fn: f())
+        b.clicked.connect(lambda _=False, f=fn: (self.poke(), f()))
         return b
+
+    def _sep(self):
+        s = QFrame()
+        s.setFixedHeight(2)
+        s.setStyleSheet("background:rgba(125,211,252,0.18);border-radius:1px;")
+        return s
 
     def _layout(self, cols):
         if cols == self.cols:
@@ -135,28 +218,13 @@ class Toolbar(QFrame):
         r = 0
         for si, sec in enumerate(self.sections):
             if si:
-                if not hasattr(self, "_seps"):
-                    self._seps = []
                 if len(self._seps) < si:
                     self._seps.append(self._sep())
                 g.addWidget(self._seps[si - 1], r, 0, 1, cols)
                 r += 1
             for i, w in enumerate(sec):
-                if isinstance(w, QLabel):
-                    r += (i + cols - 1) // cols if i % cols else i // cols
-                    g.addWidget(w, r, 0, 1, cols)
-                    r += 1
-                    break
                 g.addWidget(w, r + i // cols, i % cols)
-            else:
-                r += (len(sec) + cols - 1) // cols
-                continue
-
-    def _sep(self):
-        s = QFrame()
-        s.setFixedHeight(2)
-        s.setStyleSheet("background:#334155;")
-        return s
+            r += (len(sec) + cols - 1) // cols
 
     def _do(self, fn):
         def run():
@@ -171,23 +239,69 @@ class Toolbar(QFrame):
         else:
             c.go_page(c.index + 1)
 
+    # -------------------------------------------------------------- masquage automatique
+    def poke(self):
+        """Interaction avec la barre : on repousse le masquage automatique."""
+        if not self.pinned:
+            self.hide_timer.start()
+
+    def _auto_hide(self):
+        if not self.pinned and self.isVisible():
+            self.hide_bar()
+
+    def hide_bar(self):
+        self.hide()
+        self.more.hide()
+        self.tab.show()
+        self.place()
+
+    def show_bar(self):
+        self.tab.hide()
+        self.show()
+        self.place()
+        self.poke()
+
+    def toggle_pin(self):
+        self.pinned = not self.pinned
+        self._mark(self.btn_pin, self.pinned)
+        if self.pinned:
+            self.hide_timer.stop()
+        else:
+            self.hide_timer.start()
+
+    def toggle_more(self):
+        self.more.setVisible(not self.more.isVisible())
+        self._mark(self.btn_more, self.more.isVisible())
+        self.place()
+
     # -------------------------------------------------------------- réglages du stylet actif
     def state(self):
         return self.canvas.tool_for(self.active_key)
 
     def set_tool(self, t):
         self.state().tool = t
+        if t != "select":
+            self.canvas.selected = None
+            self.canvas.update()
         self.refresh()
 
     def set_color(self, c):
         st = self.state()
         st.color = c
-        if st.tool in ("eraser", "move"):
+        if st.tool in ("eraser", "select"):
             st.tool = "pen"
+        sel = self.canvas.selected
+        if sel is not None and "c" in sel:                  # recolorer l'objet sélectionné
+            self.canvas.recolor_selected(c)
         self.refresh()
 
     def set_width(self, n):
         self.state().width = WIDTHS[n]
+        self.refresh()
+
+    def toggle_fill(self):
+        st = self.state()
+        st.fill = not st.fill
         self.refresh()
 
     def refresh(self):
@@ -198,6 +312,7 @@ class Toolbar(QFrame):
             self._mark(b, st.color.lower() == c.lower())
         for n, b in self.width_btns.items():
             self._mark(b, st.width == WIDTHS[n])
+        self._mark(self.btn_fill, st.fill)
         if self.page_lbl is not None:
             self.page_lbl.setText(f"Page {self.canvas.index + 1} / {len(self.canvas.pages)}")
 
@@ -209,12 +324,6 @@ class Toolbar(QFrame):
             b.style().polish(b)
 
     # -------------------------------------------------------------- placement
-    def toggle_fold(self):
-        self.collapsed = not self.collapsed
-        self.body.setVisible(not self.collapsed)
-        self.adjustSize()
-        self.place()
-
     def toggle_side(self):
         self.side = "right" if self.side == "left" else "left"
         self.place()
@@ -223,7 +332,6 @@ class Toolbar(QFrame):
         p = self.parentWidget()
         if not p:
             return
-        self.adjustSize()
         for cols in (3, 4, 5, 6):
             self._layout(cols)
             self.body.adjustSize()
@@ -234,3 +342,12 @@ class Toolbar(QFrame):
         y = max(12, (p.height() - self.height()) // 2)
         self.move(QPoint(x, y))
         self.raise_()
+        if self.more.isVisible():
+            self.more.adjustSize()
+            mx = x + self.width() + 10 if self.side == "left" else x - self.more.width() - 10
+            my = max(12, min(p.height() - self.more.height() - 12, y))
+            self.more.move(mx, my)
+            self.more.raise_()
+        tx = 0 if self.side == "left" else p.width() - self.tab.width()
+        self.tab.move(tx, (p.height() - self.tab.height()) // 2)
+        self.tab.raise_()

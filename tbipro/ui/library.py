@@ -47,6 +47,10 @@ CATEGORIES = [
     ("🏠 Maison", "maison", "house"), ("⚽ Sport", "sport", "sport"), ("🎵 Musique", "musique", "music"),
     ("🔬 Sciences", "science", "science"), ("🌍 Géographie", "carte", "map"), ("🏛️ Histoire", "histoire", "history"),
     ("👨‍👩‍👧 Famille", "famille", "family"), ("👕 Vêtements", "vêtement", "clothes"), ("📚 Lecture", "livre", "book"),
+    ("🪐 Espace", "planète", "planet"), ("🏰 Monuments", "monument", "monument"), ("🍇 Fruits", "fruit", "fruit"),
+    ("🎻 Instruments", "instrument de musique", "musical instrument"), ("🛠️ Outils", "outil", "tool"),
+    ("♻️ Écologie", "recyclage", "recycling"), ("🇲🇦 Maroc", "Maroc", "Morocco"), ("🧪 Chimie", "chimie", "chemistry"),
+    ("➗ Maths", "mathématiques", "mathematics"),
 ]
 
 EMOJI = {
@@ -60,7 +64,33 @@ EMOJI = {
     "Transports et lieux": "🚗🚕🚌🚎🚓🚑🚒🚚🚜🚲🛵🏍️🚂🚆🚇✈️🚁🚀⛵🚢⚓🏠🏡🏫🏥🏦🏪🏛️🕌⛪🏰🗼🌉🏟️🏙️🗺️🧭",
     "Sport, arts et loisirs": "⚽🏀🏈⚾🎾🏐🏉🏓🏸🥊🥋⛳🏊🚴🏃🧗🎨🖌️🎭🎬🎤🎧🎵🎶🎹🥁🎸🎻🎺📷🎲🧩♟️🪁",
     "Sciences et symboles": "🔬🔭🧪🧫🧬⚗️🧲⚙️🔧🔨🪛💡🔋🔌🌡️⚖️🧮📊📈📉📌📍✅❌⭕❗❓⚠️🚫♻️➡️⬅️⬆️⬇️↔️🔄🔢🕐",
+    "Mains et gestes": "👍👎👌✌️🤞🤟🤘🤙👈👉👆👇☝️✋🤚🖐️🖖👋🤝🙏✍️💪👏🙌🫶🤲👐✊👊🫵",
+    "Maths et flèches": "➕➖✖️➗🟰♾️💯🔢#️⃣*️⃣0️⃣1️⃣2️⃣3️⃣4️⃣5️⃣6️⃣7️⃣8️⃣9️⃣🔟⬆️↗️➡️↘️⬇️↙️⬅️↖️↕️↔️↩️↪️⤴️⤵️🔃🔄🔺🔻🔷🔶🔵🟢🟡🟠🔴🟣⬛⬜",
+    "Objets du quotidien": "⌚📱💻⌨️🖱️🖨️📷📺📻⏰⏳💡🔦🕯️🧹🧺🧻🧼🪥🧴🛏️🛋️🪑🚪🪟🔑🔒🧰🪜🧲✉️📦🎁🛒💰💳",
+    "Fêtes et calendrier": "🎉🎊🎈🎂🎁🎆🎇✨🕌🌙⭐🪔🏮🎄🎃🎓🏆🥇📅🗓️⏰☀️🌅🌄🌃🌌",
+    "Plantes et fleurs": "🌱🌿☘️🍀🎍🪴🌵🌴🌳🌲🍁🍂🍃🌾🌷🌹🥀🌺🌸🌼🌻💐🪻🪷🍄🌰",
+    "Vêtements": "👕👖👗👔🧥🥼🦺👘🥻🩱🩳👙🧣🧤🧦👟👞👠👡👢🥾🧢👒🎩🎓👑💍👓🕶️🎒👜",
 }
+
+# Drapeaux (code ISO → nom) : images libres flagcdn.com (domaine public)
+FLAGS = ("ma:Maroc|dz:Algérie|tn:Tunisie|ly:Libye|eg:Égypte|mr:Mauritanie|sn:Sénégal|ml:Mali|ne:Niger|td:Tchad|"
+         "sd:Soudan|ss:Soudan du Sud|et:Éthiopie|so:Somalie|dj:Djibouti|er:Érythrée|ke:Kenya|tz:Tanzanie|ug:Ouganda|"
+         "rw:Rwanda|bi:Burundi|cd:RD Congo|cg:Congo|ga:Gabon|cm:Cameroun|ng:Nigeria|gh:Ghana|ci:Côte d'Ivoire|"
+         "bf:Burkina Faso|gn:Guinée|gw:Guinée-Bissau|sl:Sierra Leone|lr:Liberia|tg:Togo|bj:Bénin|cf:Centrafrique|"
+         "gq:Guinée équatoriale|ao:Angola|zm:Zambie|zw:Zimbabwe|mw:Malawi|mz:Mozambique|mg:Madagascar|"
+         "za:Afrique du Sud|na:Namibie|bw:Botswana|ls:Lesotho|sz:Eswatini|cv:Cap-Vert|km:Comores|mu:Maurice|"
+         "sc:Seychelles|eh:Sahara occidental|sa:Arabie saoudite|ae:Émirats arabes unis|qa:Qatar|kw:Koweït|"
+         "bh:Bahreïn|om:Oman|ye:Yémen|jo:Jordanie|ps:Palestine|lb:Liban|sy:Syrie|iq:Irak|ir:Iran|tr:Turquie|"
+         "fr:France|be:Belgique|ch:Suisse|lu:Luxembourg|mc:Monaco|es:Espagne|pt:Portugal|it:Italie|de:Allemagne|"
+         "at:Autriche|nl:Pays-Bas|gb:Royaume-Uni|ie:Irlande|dk:Danemark|se:Suède|no:Norvège|fi:Finlande|is:Islande|"
+         "pl:Pologne|cz:Tchéquie|sk:Slovaquie|hu:Hongrie|ro:Roumanie|bg:Bulgarie|gr:Grèce|hr:Croatie|si:Slovénie|"
+         "rs:Serbie|ba:Bosnie-Herzégovine|al:Albanie|mk:Macédoine du Nord|me:Monténégro|ua:Ukraine|ru:Russie|"
+         "by:Biélorussie|lt:Lituanie|lv:Lettonie|ee:Estonie|md:Moldavie|mt:Malte|cy:Chypre|us:États-Unis|ca:Canada|"
+         "mx:Mexique|br:Brésil|ar:Argentine|cl:Chili|co:Colombie|pe:Pérou|ve:Venezuela|uy:Uruguay|py:Paraguay|"
+         "bo:Bolivie|ec:Équateur|cu:Cuba|ht:Haïti|do:République dominicaine|jm:Jamaïque|cn:Chine|jp:Japon|"
+         "kr:Corée du Sud|kp:Corée du Nord|in:Inde|pk:Pakistan|bd:Bangladesh|af:Afghanistan|id:Indonésie|"
+         "my:Malaisie|sg:Singapour|th:Thaïlande|vn:Viêt Nam|ph:Philippines|au:Australie|nz:Nouvelle-Zélande|"
+         "kz:Kazakhstan|uz:Ouzbékistan|mn:Mongolie|np:Népal|lk:Sri Lanka|il:Israël|eu:Union européenne|un:ONU")
 
 
 def emoji_image(ch, size=256):
@@ -190,12 +220,68 @@ def search_wikimedia(q_fr, q_en):
     return out
 
 
+def search_flags(q_fr, q_en):
+    import unicodedata
+
+    def norm(t):
+        return "".join(c for c in unicodedata.normalize("NFD", t.lower()) if unicodedata.category(c) != "Mn")
+    q = norm(q_fr or "")
+    out = []
+    for pair in FLAGS.split("|"):
+        code, name = pair.split(":", 1)
+        if not q or q in norm(name) or q in ("drapeau", "drapeaux", "pays", "monde", "flag") or len(q) < 2:
+            out.append({"thumb": f"https://flagcdn.com/w160/{code}.png", "full": f"https://flagcdn.com/w640/{code}.png",
+                        "svg": False, "credit": "", "label": name})
+    return out
+
+
+def search_met(q_fr, q_en):
+    """Œuvres d'art du domaine public (Metropolitan Museum of Art, licence CC0)."""
+    ids = json.loads(_get("https://collectionapi.metmuseum.org/public/collection/v1/search?hasImages=true&isPublicDomain=true&q="
+                          + urllib.parse.quote(q_en or q_fr))).get("objectIDs") or []
+    out = []
+    lock = threading.Lock()
+
+    def one(i):
+        try:
+            o = json.loads(_get(f"https://collectionapi.metmuseum.org/public/collection/v1/objects/{i}", 10))
+            if o.get("isPublicDomain") and o.get("primaryImageSmall"):
+                with lock:
+                    out.append({"thumb": o["primaryImageSmall"], "full": o.get("primaryImage") or o["primaryImageSmall"],
+                                "svg": False, "credit": "", "label": (o.get("title") or "")[:60]})
+        except Exception:
+            pass
+    with ThreadPoolExecutor(max_workers=8) as ex:
+        list(ex.map(one, ids[:36]))
+    return out
+
+
+def search_icons_simple(q_fr, q_en):
+    url = ("https://api.iconify.design/search?limit=120&prefixes=mdi,tabler,ph,material-symbols,carbon&query="
+           + urllib.parse.quote(q_en or q_fr))
+    data = json.loads(_get(url))
+    out = []
+    for name in data.get("icons", []):
+        prefix, icon = name.split(":", 1)
+        u = f"https://api.iconify.design/{prefix}/{icon}.svg?height=256&color=%230f172a"
+        out.append({"thumb": u, "full": u, "svg": True, "credit": ""})
+    return out
+
+
+def search_maps(q_fr, q_en):
+    return search_wikimedia(f"{q_fr} carte map", q_en)
+
+
 PROVIDERS = [
     ("Pictogrammes ARASAAC (français)", search_arasaac),
     ("Icônes couleur (OpenMoji, Noto…)", search_iconify),
     ("Illustrations libres (Openverse)", search_openverse_illus),
     ("Photos libres (Openverse)", search_openverse_photo),
     ("Wikimedia Commons", search_wikimedia),
+    ("Cartes et schémas (Wikimedia)", search_maps),
+    ("Œuvres d'art — domaine public (Met Museum)", search_met),
+    ("Icônes simples (Material, Tabler…)", search_icons_simple),
+    ("Drapeaux du monde", search_flags),
 ]
 
 
@@ -322,6 +408,10 @@ class LibraryDialog(QDialog):
             b.clicked.connect(lambda _=False, fr=fr, en=en, b=b: self._cat(b, fr, en))
             self.cat_btns.append(b)
             cats.addWidget(b, i // 9, i % 9)
+        flags = QPushButton("🏳️ Tous les drapeaux")
+        flags.setObjectName("cat")
+        flags.clicked.connect(lambda: (self.provider.setCurrentIndex(len(PROVIDERS) - 1), self.run_search("drapeaux", "flags")))
+        cats.addWidget(flags, (len(CATEGORIES)) // 9, len(CATEGORIES) % 9)
         v.addLayout(cats)
         self.online_status = QLabel("Choisissez une banque et une catégorie, ou tapez un mot.")
         self.online_status.setObjectName("info")
@@ -377,7 +467,7 @@ class LibraryDialog(QDialog):
                                    if results else "Aucun résultat : essayez un autre mot ou une autre banque.")
         cols = self._cols()
         for i, r in enumerate(results):
-            b = self._tile(tip=r["credit"])
+            b = self._tile(tip=r.get("label") or r["credit"])
             b.setText("…")
             b.clicked.connect(lambda _=False, r=r: self._download_full(r))
             self.online_grid.addWidget(b, i // cols, i % cols)

@@ -125,6 +125,8 @@ class WebcamSource(BaseSource):
             self.error = f"Caméra « {self.src} » introuvable"
             return
         cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+        cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)      # plus de pixels : main mieux détectée
+        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
         last_prev = 0
         hand = None
         while self.running:
@@ -136,7 +138,7 @@ class WebcamSource(BaseSource):
             if p.get("mode") == "doigt":
                 if hand is None:
                     hand = self._hand_detector()
-                blobs = hand.detect(frame, p["roi"]) if hand else []
+                blobs = hand.detect(frame, p["roi"], p.get("crop", True)) if hand else []
             else:
                 blobs = vision.detect_blobs(frame, p["threshold"], p["min_area"], p["max_area"], p["roi"])
             self._push(blobs)
@@ -317,7 +319,7 @@ class PhoneSource(BaseSource):
     def _cfg_msg(self):
         p = self.params
         return {"thr": p["threshold"], "minA": p["min_area"], "maxA": p["max_area"], "roi": p["roi"],
-                "mode": p.get("mode", "led"), "model": bool(handmodel.model_path())}
+                "mode": p.get("mode", "led"), "model": bool(handmodel.model_path()), "crop": p.get("crop", True)}
 
     def _broadcast(self, msg):
         if not self.loop:
