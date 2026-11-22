@@ -24,7 +24,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt pyinstaller
       - name: Modèle de détection de la main (inclus dans l'exe, fonctionne hors ligne)
-        run: Invoke-WebRequest -Uri "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task" -OutFile "tbipro/phone/mp/hand_landmarker.task"
+        run: if (!(Test-Path "tbipro/phone/mp/hand_landmarker.task")) { Invoke-WebRequest -Uri "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task" -OutFile "tbipro/phone/mp/hand_landmarker.task" }
       - name: PyInstaller
         run: >
           pyinstaller --noconfirm --clean --windowed --name "TBI Pro"

@@ -32,14 +32,16 @@ QLabel#section { color: #7dd3fc; font: 700 11px "Segoe UI"; padding-top: 4px; }
 """
 
 TAB_STYLE = ("QPushButton{background:qlineargradient(x1:0,y1:0,x2:1,y2:1,stop:0 #0284c7,stop:1 #7c3aed);color:white;"
-             "border-radius:14px;font:700 22px 'Segoe UI Emoji','Segoe UI';border:2px solid rgba(255,255,255,0.5);}"
+             "border-radius:14px;font:700 16px 'Segoe UI Emoji','Segoe UI';border:2px solid rgba(255,255,255,0.5);}"
              "QPushButton:pressed{background:#0c4a6e;}")
 
 PRIMARY_TOOLS = [("select", "🖐️", "Sélection : déplacer, agrandir, pivoter, dupliquer, supprimer"),
                  ("pen", "✏️", "Stylo"), ("marker", "🖍️", "Surligneur"), ("eraser", "🧽", "Gomme"),
                  ("handwrite", "✍️", "Écriture → texte (reconnaissance de l'écriture manuscrite)"),
                  ("magic", "🪄", "Stylo de formes : cercle, rectangle, triangle, ligne, flèche reconnus"),
+                 ("autodraw", "🖌️", "Croquis → icône : dessinez un objet, choisissez l'icône proposée"),
                  ("text", "🔤", "Texte (clavier virtuel)"),
+                 ("postit", "🗒️", "Post-it : touchez la page puis écrivez la note (agrandissable avec 🖐️)"),
                  ("line", "╱", "Ligne"), ("arrow", "➚", "Flèche"), ("rect", "▭", "Rectangle"),
                  ("ellipse", "◯", "Ellipse / cercle"), ("triangle", "△", "Triangle"), ("star", "☆", "Étoile")]
 
@@ -64,21 +66,21 @@ class Toolbar(QFrame):
         _shadow(self)
         self.canvas, self.kind = canvas, kind
         self.active_key = "souris"     # stylet qui a touché la barre en dernier
-        self.side = "left"
+        self.side = "bottom"            # barre horizontale en bas (ou en haut)
         self.pinned = False
         self.tool_btns, self.color_btns, self.width_btns = {}, {}, {}
         self.page_lbl = None
 
         # ------------------------------------------------ barre principale
-        outer = QVBoxLayout(self)
+        outer = QHBoxLayout(self)
         outer.setContentsMargins(8, 8, 8, 8)
-        outer.setSpacing(6)
-        top = QHBoxLayout()
+        outer.setSpacing(8)
+        top = QVBoxLayout()
         top.setSpacing(4)
         self.btn_pin = self._btn("📌", "Épingler la barre (ne plus la masquer)", self.toggle_pin, small=True)
         top.addWidget(self.btn_pin)
-        top.addWidget(self._btn("⇆", "Changer de côté", self.toggle_side, small=True))
-        top.addWidget(self._btn("«", "Masquer la barre", self.hide_bar, small=True))
+        top.addWidget(self._btn("⇅", "Barre en haut / en bas", self.toggle_side, small=True))
+        top.addWidget(self._btn("⌄", "Masquer la barre", self.hide_bar, small=True))
         outer.addLayout(top)
         self.body = QWidget()
         self.grid = QGridLayout(self.body)
@@ -129,19 +131,24 @@ class Toolbar(QFrame):
         self.more.setObjectName("more")
         self.more.setStyleSheet(STYLE)
         _shadow(self.more)
-        mv = QVBoxLayout(self.more)
-        mv.setContentsMargins(10, 10, 10, 10)
-        mv.setSpacing(4)
+        mv = QHBoxLayout(self.more)
+        mv.setContentsMargins(12, 10, 12, 10)
+        mv.setSpacing(14)
 
-        def section(title, items, cols=4):
+        def section(title, items, cols=None):
+            box = QVBoxLayout()
+            box.setSpacing(4)
             lbl = QLabel(title)
             lbl.setObjectName("section")
-            mv.addWidget(lbl)
+            box.addWidget(lbl)
             g = QGridLayout()
             g.setSpacing(6)
+            cols = cols or max(2, (len(items) + 1) // 2)       # deux rangées
             for i, w in enumerate(items):
                 g.addWidget(w, i // cols, i % cols)
-            mv.addLayout(g)
+            box.addLayout(g)
+            box.addStretch(1)
+            mv.addLayout(box)
 
         ins = lambda k: self._do(lambda: self.canvas.toggle_instrument(k))
         compass = B("🧭", "Compas : appuyer au centre, glisser pour le rayon", lambda: self.set_tool("compass"))
@@ -160,13 +167,13 @@ class Toolbar(QFrame):
             B("⚙️", "Panneau de contrôle", self.panel_requested.emit)])
         if kind == "board":
             self.page_lbl = QLabel("Page 1 / 1")
-            section("PAGES", [B("◀", "Page précédente", self._do(lambda: self.canvas.go_page(self.canvas.index - 1))),
+            self.page_lbl.setAlignment(Qt.AlignCenter)
+            section("PAGES", [self.page_lbl,B("◀", "Page précédente", self._do(lambda: self.canvas.go_page(self.canvas.index - 1))),
                               B("▶", "Page suivante", self._do(self._next_page)),
                               B("➕", "Nouvelle page", self._do(self.canvas.add_page)),
                               B("🗂️", "Gérer les pages (aperçus, réordonner, dupliquer)", lambda: self.action.emit("pages")),
                               B("▦", "Changer le fond (Seyès, repère, millimétré…)", self._do(self.canvas.cycle_background)),
                               B("❌", "Supprimer la page", self._do(self.canvas.delete_page))])
-            mv.addWidget(self.page_lbl)
             section("FICHIERS", [B("💾", "Enregistrer (Documents/TBI Pro)", lambda: self.action.emit("save")),
                                  B("📂", "Ouvrir un tableau", lambda: self.action.emit("open")),
                                  B("📥", "Importer un PDF ou une présentation exportée en PDF", lambda: self.action.emit("pdfimport")),
@@ -177,9 +184,9 @@ class Toolbar(QFrame):
         self.more.hide()
 
         # ------------------------------------------------ onglet (barre masquée)
-        self.tab = QPushButton("☰", parent)
+        self.tab = QPushButton("☰  Outils", parent)
         self.tab.setToolTip("Afficher la barre d'outils")
-        self.tab.setFixedSize(44, 96)
+        self.tab.setFixedSize(120, 40)
         self.tab.setStyleSheet(TAB_STYLE)
         self.tab.setFocusPolicy(Qt.NoFocus)
         self.tab.clicked.connect(lambda _=False: self.show_bar())
@@ -205,27 +212,29 @@ class Toolbar(QFrame):
 
     def _sep(self):
         s = QFrame()
-        s.setFixedHeight(2)
+        s.setFixedWidth(2)
         s.setStyleSheet("background:rgba(125,211,252,0.18);border-radius:1px;")
         return s
 
-    def _layout(self, cols):
-        if cols == self.cols:
+    def _layout(self, rows):
+        """Sections côte à côte, chacune sur « rows » rangées, séparées par un trait vertical."""
+        if rows == self.cols:
             return
-        self.cols = cols
+        self.cols = rows
         g = self.grid
         while g.count():
             g.takeAt(0)
-        r = 0
+        c = 0
         for si, sec in enumerate(self.sections):
             if si:
                 if len(self._seps) < si:
                     self._seps.append(self._sep())
-                g.addWidget(self._seps[si - 1], r, 0, 1, cols)
-                r += 1
+                g.addWidget(self._seps[si - 1], 0, c, rows, 1)
+                c += 1
+            ncol = (len(sec) + rows - 1) // rows
             for i, w in enumerate(sec):
-                g.addWidget(w, r + i // cols, i % cols)
-            r += (len(sec) + cols - 1) // cols
+                g.addWidget(w, i % rows, c + i // rows)
+            c += ncol
 
     def _do(self, fn):
         def run():
@@ -326,29 +335,29 @@ class Toolbar(QFrame):
 
     # -------------------------------------------------------------- placement
     def toggle_side(self):
-        self.side = "right" if self.side == "left" else "left"
+        self.side = "top" if self.side == "bottom" else "bottom"
         self.place()
 
     def place(self):
         p = self.parentWidget()
         if not p:
             return
-        for cols in (3, 4, 5, 6):
-            self._layout(cols)
+        for rows in (1, 2, 3, 4):
+            self._layout(rows)
             self.body.adjustSize()
             self.adjustSize()
-            if self.height() <= p.height() - 24:
+            if self.width() <= p.width() - 24:
                 break
-        x = 12 if self.side == "left" else p.width() - self.width() - 12
-        y = max(12, (p.height() - self.height()) // 2)
+        x = max(12, (p.width() - self.width()) // 2)
+        y = p.height() - self.height() - 12 if self.side == "bottom" else 12
         self.move(QPoint(x, y))
         self.raise_()
         if self.more.isVisible():
             self.more.adjustSize()
-            mx = x + self.width() + 10 if self.side == "left" else x - self.more.width() - 10
-            my = max(12, min(p.height() - self.more.height() - 12, y))
-            self.more.move(mx, my)
+            mx = max(12, min(p.width() - self.more.width() - 12, (p.width() - self.more.width()) // 2))
+            my = y - self.more.height() - 10 if self.side == "bottom" else y + self.height() + 10
+            self.more.move(mx, max(12, my))
             self.more.raise_()
-        tx = 0 if self.side == "left" else p.width() - self.tab.width()
-        self.tab.move(tx, (p.height() - self.tab.height()) // 2)
+        ty = p.height() - self.tab.height() if self.side == "bottom" else 0
+        self.tab.move((p.width() - self.tab.width()) // 2, ty)
         self.tab.raise_()

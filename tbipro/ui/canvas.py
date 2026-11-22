@@ -32,6 +32,7 @@ WIDTHS = {"fin": 3, "moyen": 6, "epais": 12}
 DEFAULT_INK = {"rouge": "#dc2626", "vert": "#16a34a", "bleu": "#2563eb"}
 SHAPES = ("line", "arrow", "rect", "ellipse", "triangle", "star")
 FILLABLE = ("rect", "ellipse", "triangle", "star", "poly")
+POSTIT_COLORS = ["#fde68a", "#fbcfe8", "#bbf7d0", "#bfdbfe", "#fed7aa", "#e9d5ff"]
 TEXT_FLAGS = int(Qt.AlignLeft | Qt.AlignTop | Qt.TextWordWrap)
 
 
@@ -189,6 +190,8 @@ def shape_polygon(k, x1, y1, x2, y2):
 # ----------------------------------------------------------------------------
 def local_bounds(it):
     k = it["k"]
+    if k == "postit":
+        return QRectF(it["p"][0], it["p"][1], it["size"][0], it["size"][1])
     if k == "image":
         x, y, w, h = it["r"]
         return QRectF(x, y, w, h + (18 if it.get("credit") else 0))
@@ -257,8 +260,48 @@ def draw_item(p, it):
         _draw_raw(p, it)
 
 
+def _draw_postit(p, it):
+    x, y = it["p"]
+    w, h = it["size"]
+    p.setPen(Qt.NoPen)
+    p.setBrush(QColor(0, 0, 0, 45))                     # ombre
+    p.drawRoundedRect(QRectF(x + 6, y + 8, w, h), 6, 6)
+    col = QColor(it.get("col", POSTIT_COLORS[0]))
+    fold = min(w, h) * 0.16
+    poly = QPolygonF([QPointF(x, y), QPointF(x + w, y), QPointF(x + w, y + h - fold), QPointF(x + w - fold, y + h),
+                      QPointF(x, y + h)])
+    p.setBrush(col)
+    p.drawPolygon(poly)
+    p.setBrush(col.darker(115))                          # coin replié
+    p.drawPolygon(QPolygonF([QPointF(x + w, y + h - fold), QPointF(x + w - fold, y + h),
+                             QPointF(x + w - fold, y + h - fold)]))
+    p.setBrush(QColor(255, 255, 255, 70))                # bande adhésive
+    p.drawRect(QRectF(x, y, w, h * 0.12))
+    if it.get("ink"):
+        p.save()
+        p.setClipRect(QRectF(x, y, w, h))
+        for child in it["ink"]:
+            draw_item(p, child)
+        p.restore()
+    if it.get("t"):
+        size = it.get("s", 28)
+        f = text_font(size)
+        fm = QFontMetricsF(f)
+        box = QRectF(x + 16, y + h * 0.14, w - 32, h * 0.82)
+        while size > 12 and fm.boundingRect(box, TEXT_FLAGS, it["t"]).height() > box.height():
+            size -= 2                                    # le texte s'adapte à la taille du post-it
+            f = text_font(size)
+            fm = QFontMetricsF(f)
+        p.setFont(f)
+        p.setPen(QColor(it.get("c", "#1f2937")))
+        p.drawText(box, TEXT_FLAGS, it["t"])
+
+
 def _draw_raw(p, it):
     k = it["k"]
+    if k == "postit":
+        _draw_postit(p, it)
+        return
     if k == "image":
         x, y, w, h = it["r"]
         p.drawImage(QRectF(x, y, w, h), item_image(it))
@@ -366,6 +409,8 @@ def hit(it, x, y, r):
         x, y = to_item_local(it, x, y)
         r = r / (it.get("scl", 1.0) or 1.0)
     k = it["k"]
+    if k == "postit":
+        return local_bounds(it).adjusted(-r, -r, r, r).contains(QPointF(x, y))
     if k == "image":
         X, Y, W, H = it["r"]
         return X - r <= x <= X + W + r and Y - r <= y <= Y + H + r
@@ -405,6 +450,10 @@ def translate(it, dx, dy):
         it["r"] = [it["r"][0] + dx, it["r"][1] + dy, it["r"][2], it["r"][3]]
     elif k in ("text", "mindmap"):
         it["p"] = [it["p"][0] + dx, it["p"][1] + dy]
+    elif k == "postit":
+        it["p"] = [it["p"][0] + dx, it["p"][1] + dy]
+        for child in it.get("ink", []):
+            translate(child, dx, dy)
     elif k in ("stroke", "poly"):
         it["pts"] = [[x + dx, y + dy] for x, y in it["pts"]]
     else:
@@ -418,6 +467,8 @@ def clone(it):
         c["pts"] = [list(p) for p in it["pts"]]
     if "tree" in it:
         c["tree"] = json.loads(json.dumps(it["tree"]))
+    if "ink" in it:
+        c["ink"] = [clone(ch) for ch in it["ink"]]
     if "_img" in it:
         c["_img"] = it["_img"]
     return c
@@ -431,6 +482,7 @@ class InkCanvas(QWidget):
     text_requested = Signal(object, str)   # position (page), clé du stylet : saisir un texte
     edit_text_requested = Signal(object)   # objet texte à modifier
     _hw_done = Signal(object, object)
+    _ad_done = Signal(object, object)
 
     def __init__(self, transparent=False, parent=None):
         super().__init__(parent)
@@ -446,6 +498,10 @@ class InkCanvas(QWidget):
         self._hw_group = []     # traits du stylo « écriture → texte » en attente
         self._hw_timer = QTimer(self, singleShot=True, interval=1400, timeout=self._hw_recognize)
         self._hw_done.connect(self._hw_apply)
+        self._ad_group = []     # croquis en attente de reconnaissance (croquis → icône)
+        self._ad = None         # propositions affichées
+        self._ad_timer = QTimer(self, singleShot=True, interval=1300, timeout=self._ad_recognize)
+        self._ad_done.connect(self._ad_show)
         self._cache = None
         self._toast, self._toast_t = "", 0
         self.setAttribute(Qt.WA_OpaquePaintEvent, not transparent)
@@ -466,6 +522,7 @@ class InkCanvas(QWidget):
     def go_page(self, i):
         self.cancel_all()
         self.selected = None
+        self._ad = None
         self.index = max(0, min(len(self.pages) - 1, i))
         self.invalidate()
 
@@ -562,7 +619,7 @@ class InkCanvas(QWidget):
 
     # -------------------------------------------------------------- sélection
     SEL_ACTIONS = [("delete", "🗑"), ("duplicate", "⧉"), ("front", "⬆"), ("back", "⬇"), ("edit", "✏"), ("fill", "◧"),
-                   ("shape", "⬠")]
+                   ("shape", "⬠"), ("postit", "🗒"), ("pcolor", "🎨")]
 
     def _sel_valid(self):
         if self.selected is not None and not any(it is self.selected for it in self.page["items"]):
@@ -586,9 +643,12 @@ class InkCanvas(QWidget):
         top = ((cs[0][0] + cs[1][0]) / 2, (cs[0][1] + cs[1][1]) / 2)
         rot = (top[0] + 46 * math.sin(a), top[1] - 46 * math.cos(a))
         W, H = self.page["size"]
-        acts = [a_ for a_ in self.SEL_ACTIONS if not (a_[0] == "edit" and it["k"] != "text")
+        acts = [a_ for a_ in self.SEL_ACTIONS if not (a_[0] == "edit" and it["k"] not in ("text", "postit"))
                 and not (a_[0] == "fill" and it["k"] not in FILLABLE)
-                and not (a_[0] == "shape" and it["k"] != "stroke")]
+                and not (a_[0] == "shape" and it["k"] != "stroke")
+                and not (a_[0] == "postit" and it["k"] not in ("text", "stroke", "image"))
+                and not (a_[0] == "pcolor" and it["k"] != "postit")
+                and not (a_[0] == "edit" and it["k"] == "postit" and it.get("t") is None)]
         by = max(p[1] for p in cs) + 44
         if by > H - 30:
             by = min(p[1] for p in cs) - 44
@@ -629,6 +689,27 @@ class InkCanvas(QWidget):
             items[items.index(it)] = shape
             self.selected = shape
             self.toast("Forme redressée")
+        elif name == "postit":                     # note → post-it agrandissable
+            b = local_bounds(it)
+            pad = 24
+            if it["k"] == "text":
+                w, h = max(220, b.width() + 2 * pad), max(180, b.height() + 2 * pad + 20)
+                note = {"k": "postit", "p": [b.x() - pad, b.y() - pad - 20], "size": [w, h], "t": it["t"],
+                        "s": max(22, min(48, it.get("s", 32))), "c": "#1f2937", "col": POSTIT_COLORS[0]}
+            else:
+                w, h = max(200, b.width() + 2 * pad), max(170, b.height() + 2 * pad + 20)
+                note = {"k": "postit", "p": [b.x() - pad, b.y() - pad - 20], "size": [w, h],
+                        "col": POSTIT_COLORS[0], "ink": [clone(it)]}
+            if is_transformed(it):
+                note["rot"], note["scl"] = it.get("rot", 0), it.get("scl", 1.0)
+            items[items.index(it)] = note
+            self.selected = note
+        elif name == "pcolor":
+            c = clone(it)
+            i = POSTIT_COLORS.index(it.get("col")) if it.get("col") in POSTIT_COLORS else -1
+            c["col"] = POSTIT_COLORS[(i + 1) % len(POSTIT_COLORS)]
+            items[items.index(it)] = c
+            self.selected = c
         elif name == "edit":
             self.page["undo"].pop()
             self.edit_text_requested.emit(it)
@@ -768,13 +849,18 @@ class InkCanvas(QWidget):
         if ts.tool == "text":
             self.text_requested.emit((x, y), key)
             return
+        if ts.tool == "postit":
+            self.text_requested.emit((x, y), "postit:" + key)
+            return
+        if self._ad and self._ad_hit(x, y):           # propositions d'icônes du croquis
+            return
         if ts.tool == "compass":
             g["center"] = (x, y)
             g["radius"] = 0.0
             self.active[pid] = g
             self.update()
             return
-        if ts.tool in ("pen", "marker", "magic", "handwrite"):
+        if ts.tool in ("pen", "marker", "magic", "handwrite", "autodraw"):
             a = 90 if ts.tool == "marker" else 255
             w = ts.width * (3 if ts.tool == "marker" else 1)
             if ts.tool in ("pen", "marker"):
@@ -787,6 +873,9 @@ class InkCanvas(QWidget):
             g["item"] = {"k": "stroke", "c": ts.color, "w": w, "a": a, "pts": [[x, y]]}
             if ts.tool == "handwrite":
                 self._hw_timer.stop()
+            if ts.tool == "autodraw":
+                self._ad_timer.stop()
+                self._ad = None
         elif ts.tool in SHAPES:
             g["item"] = {"k": ts.tool, "c": ts.color, "w": ts.width, "p1": [x, y], "p2": [x, y]}
             if ts.fill and ts.tool in FILLABLE:
@@ -819,7 +908,7 @@ class InkCanvas(QWidget):
         elif tool == "compass":
             cx, cy = g["center"]
             g["radius"] = math.hypot(x - cx, y - cy)
-        elif tool in ("pen", "marker", "magic", "handwrite"):
+        elif tool in ("pen", "marker", "magic", "handwrite", "autodraw"):
             if "edge" in g:
                 x, y = instr.project_on_line(x, y, g["edge"], g["edge_off"])
                 pts = g["item"]["pts"]
@@ -888,12 +977,95 @@ class InkCanvas(QWidget):
             if tool == "handwrite":
                 self._hw_group.append(g["item"])
                 self._hw_timer.start()
+            if tool == "autodraw":
+                self._ad_group.append(g["item"])
+                self._ad_timer.start()
             if self._cache is not None:
                 self._draw_on_cache(g["item"])
         if tool.startswith("sel_"):
             self._cache = None
         self.update()
         self.changed.emit()
+
+    # -------------------------------------------------------------- croquis → icône
+    def _ad_recognize(self):
+        group = [it for it in self._ad_group if any(it is i for i in self.page["items"])]
+        self._ad_group = []
+        if not group:
+            return
+        self.toast("Recherche d'icônes pour votre dessin…")
+        W, H = self.page["size"]
+        strokes = [it["pts"] for it in group]
+
+        def job():
+            from concurrent.futures import ThreadPoolExecutor
+            try:
+                names = recognize.recognize_sketch(strokes, W, H)
+
+                def get(n):
+                    try:
+                        return n, recognize.icon_for(n)
+                    except Exception:
+                        return n, None
+                with ThreadPoolExecutor(max_workers=6) as ex:
+                    found = [r for r in ex.map(get, names[:9]) if r[1]]
+                self._ad_done.emit(group, found[:7])
+            except Exception as e:
+                self._ad_done.emit(group, RuntimeError(str(e)))
+        threading.Thread(target=job, daemon=True).start()
+
+    def _ad_show(self, group, found):
+        if isinstance(found, Exception) or not found:
+            self.toast("Aucune icône trouvée (connexion Internet ?)" if isinstance(found, Exception)
+                       else "Aucune icône trouvée : dessinez plus simplement")
+            return
+        from PySide6.QtSvg import QSvgRenderer
+        xs = [p[0] for it in group for p in it["pts"]]
+        ys = [p[1] for it in group for p in it["pts"]]
+        box = QRectF(min(xs), min(ys), max(xs) - min(xs), max(ys) - min(ys))
+        W, H = self.page["size"]
+        size, gap = 74, 10
+        total = len(found) * (size + gap) + 60
+        x0 = max(10, min(W - total - 10, box.center().x() - total / 2))
+        below_ok = box.bottom() + 24 + size < H - 190      # la barre d'outils occupe le bas de l'écran
+        y0 = box.bottom() + 24 if below_ok else max(30, box.top() - size - 34)
+        entries = []
+        for i, (name, svg) in enumerate(found):
+            img = QImage(256, 256, QImage.Format_ARGB32)
+            img.fill(Qt.transparent)
+            pp = QPainter(img)
+            QSvgRenderer(QByteArray(svg)).render(pp)
+            pp.end()
+            entries.append((name, img, QRectF(x0 + i * (size + gap), y0, size, size)))
+        self._ad = {"group": group, "box": box, "entries": entries,
+                    "close": QRectF(x0 + len(found) * (size + gap), y0 + 12, 50, 50)}
+        self.update()
+
+    def _ad_hit(self, x, y):
+        ad = self._ad
+        if ad["close"].adjusted(-6, -6, 6, 6).contains(QPointF(x, y)):
+            self._ad = None
+            self.update()
+            return True
+        for name, img, r in ad["entries"]:
+            if r.adjusted(-4, -4, 4, 4).contains(QPointF(x, y)):
+                group = ad["group"]
+                ids = {id(it) for it in group}
+                items = self.page["items"]
+                box = ad["box"]
+                s = max(box.width(), box.height(), 80)
+                buf = QBuffer()
+                buf.open(QIODevice.WriteOnly)
+                img.save(buf, "PNG")
+                self._snapshot()
+                items[:] = [i for i in items if id(i) not in ids]
+                items.append({"k": "image", "data": base64.b64encode(bytes(buf.data())).decode(),
+                              "r": [box.center().x() - s / 2, box.center().y() - s / 2, s, s], "_img": img})
+                self._ad = None
+                self.toast(f"Icône : {name}")
+                self.invalidate()
+                return True
+        return False
 
     # -------------------------------------------------------------- écriture manuscrite → texte
     def _hw_recognize(self):
@@ -970,6 +1142,11 @@ class InkCanvas(QWidget):
 
     def add_text(self, pos, text, key):
         if not text.strip():
+            return
+        if key.startswith("postit:"):
+            ts = self.tool_for(key.split(":", 1)[1])
+            self.add_item({"k": "postit", "p": [pos[0] - 20, pos[1] - 20], "size": [280, 240], "t": text,
+                           "s": 30, "c": "#1f2937", "col": POSTIT_COLORS[len(self.page["items"]) % len(POSTIT_COLORS)]})
             return
         ts = self.tool_for(key)
         size = {3: 28, 6: 40, 12: 60}.get(ts.width, 36)
@@ -1130,6 +1307,25 @@ class InkCanvas(QWidget):
                 p.setFont(text_font(14))
                 p.setPen(QColor(3, 105, 161))
                 p.drawText(QPointF(r[0] + 18, r[1] + 5), "  ".join(info))
+        if self._ad:                                    # propositions d'icônes
+            ad = self._ad
+            first, last = ad["entries"][0][2], ad["close"]
+            bar = QRectF(first.left() - 10, first.top() - 10, last.right() - first.left() + 20, first.height() + 20)
+            p.setPen(Qt.NoPen)
+            p.setBrush(QColor(15, 23, 42, 225))
+            p.drawRoundedRect(bar, 16, 16)
+            for name, img, r in ad["entries"]:
+                p.setBrush(QColor(255, 255, 255))
+                p.drawRoundedRect(r, 12, 12)
+                p.drawImage(r.adjusted(6, 6, -6, -6), img)
+            c = ad["close"]
+            p.setBrush(QColor(127, 29, 29))
+            p.drawEllipse(c)
+            p.setPen(QColor("white"))
+            p.setFont(QFont("Segoe UI Symbol", 16, QFont.Bold))
+            p.drawText(c, Qt.AlignCenter, "✕")
+            p.setFont(text_font(13))
+            p.drawText(QPointF(bar.left() + 8, bar.top() - 6), "Touchez une icône pour remplacer votre dessin (✕ = garder)")
         for (hx, hy) in self.hovers.values():          # curseur du doigt
             p.setPen(QPen(QColor(250, 204, 21), 3))
             p.setBrush(QColor(250, 204, 21, 60))

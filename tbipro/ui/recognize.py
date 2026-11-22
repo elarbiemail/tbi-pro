@@ -176,3 +176,46 @@ def recognize_handwriting(strokes, width, height, lang="fr", timeout=10):
     if not data or data[0] != "SUCCESS":
         raise RuntimeError("réponse inattendue du service")
     return list(data[1][0][1])
+
+
+# ----------------------------------------------------------------------------
+# Croquis → icônes (même principe que Google AutoDraw)
+# ----------------------------------------------------------------------------
+AD_URL = "https://inputtools.google.com/request?ime=handwriting&app=autodraw&dbg=1&cs=1&oe=UTF-8"
+
+
+def recognize_sketch(strokes, width, height, timeout=10):
+    """Dessin à main levée → liste de noms d'objets probables (en anglais : « cat », « house »…)."""
+    ink = []
+    t = 0
+    for s in strokes:
+        xs = [int(p[0]) for p in s]
+        ys = [int(p[1]) for p in s]
+        ink.append([xs, ys, list(range(t, t + 10 * len(s), 10))])
+        t += 10 * len(s) + 200
+    body = {"input_type": 0, "requests": [{"language": "autodraw", "ink": ink,
+                                           "writing_guide": {"width": int(width), "height": int(height)}}]}
+    req = urllib.request.Request(AD_URL, data=json.dumps(body).encode("utf-8"),
+                                 headers={"Content-Type": "application/json", "User-Agent": "TBIPro/1.0"})
+    with urllib.request.urlopen(req, timeout=timeout) as r:
+        data = json.loads(r.read().decode("utf-8"))
+    if not data or data[0] != "SUCCESS":
+        raise RuntimeError("réponse inattendue du service")
+    return [c for c in data[1][0][1] if c][:10]
+
+
+def icon_for(name, timeout=8):
+    """Première icône couleur libre (Fluent Emoji, Noto, OpenMoji, Twemoji) correspondant au nom → SVG."""
+    import urllib.parse
+    q = urllib.parse.quote(name.replace("-", " "))
+    url = f"https://api.iconify.design/search?limit=3&prefixes=fluent-emoji-flat,noto,openmoji,twemoji&query={q}"
+    req = urllib.request.Request(url, headers={"User-Agent": "TBIPro/1.0"})
+    with urllib.request.urlopen(req, timeout=timeout) as r:
+        icons = json.loads(r.read().decode("utf-8")).get("icons", [])
+    if not icons:
+        return None
+    prefix, icon = icons[0].split(":", 1)
+    req = urllib.request.Request(f"https://api.iconify.design/{prefix}/{icon}.svg?height=256",
+                                 headers={"User-Agent": "TBIPro/1.0"})
+    with urllib.request.urlopen(req, timeout=timeout) as r:
+        return r.read()

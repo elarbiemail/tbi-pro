@@ -110,10 +110,20 @@ async function startCamera() {
     return;
   }
   try {
-    const stream = await navigator.mediaDevices.getUserMedia({
-      audio: false,
-      video: { facingMode: { ideal: "environment" }, width: { ideal: 1920 }, height: { ideal: 1080 }, frameRate: { ideal: 60, min: 24 } }
-    });
+    // Contraintes « idéales » seulement (jamais « min ») : sinon certains téléphones refusent la caméra.
+    let stream;
+    const tries = [
+      { facingMode: { ideal: "environment" }, width: { ideal: 1920 }, height: { ideal: 1080 }, frameRate: { ideal: 30 } },
+      { facingMode: { ideal: "environment" }, width: { ideal: 1280 }, height: { ideal: 720 } },
+      { facingMode: "environment" },
+      true
+    ];
+    let lastErr = null;
+    for (const v of tries) {
+      try { stream = await navigator.mediaDevices.getUserMedia({ audio: false, video: v }); break; }
+      catch (e) { lastErr = e; }
+    }
+    if (!stream) throw lastErr || new Error("caméra introuvable");
     video.srcObject = stream;
     track = stream.getVideoTracks()[0];
     await video.play();
@@ -124,7 +134,8 @@ async function startCamera() {
     if (video.requestVideoFrameCallback) video.requestVideoFrameCallback(onFrame);
     else requestAnimationFrame(onFrame);
   } catch (e) {
-    $("err").textContent = "Caméra refusée ou indisponible : " + e.message;
+    $("err").textContent = "Caméra refusée ou indisponible : " + (e.name || "") + " " + (e.message || "") +
+      " — Vérifiez l'autorisation de la caméra pour ce site, puis rechargez la page.";
   }
 }
 
@@ -269,10 +280,12 @@ async function loadHand() {
   } catch (e) {
     handError = "Détection de la main impossible : " + e.message;
     setStatus(handError, "bad");
+    send({ t: "info", txt: "— ERREUR main : " + e.message });
   }
   handLoading = false;
 }
-let lastTs = 0;
+let lastTs = 0, lastHands = [], lastHandInfo = 0;
+const HAND_LINKS = [[0,1],[1,2],[2,3],[3,4],[0,5],[5,6],[6,7],[7,8],[5,9],[9,10],[10,11],[11,12],[9,13],[13,14],[14,15],[15,16],[13,17],[17,18],[18,19],[19,20],[0,17]];
 const hcan = document.createElement("canvas"), hctx = hcan.getContext("2d");
 // Zoom sur la projection : on ne donne au modèle que la zone utile, agrandie → doigt plus précis
 function cropBox(vw, vh) {
@@ -298,6 +311,12 @@ function detectHands() {
     src = hcan;
   }
   const res = hand.detectForVideo(src, ts);
+  lastHands = (res.landmarks || []).map(lm => lm.map(q => [(cx + q.x * cw) / vw, (cy + q.y * ch) / vh]));
+  const nowS = performance.now();
+  if (nowS - lastHandInfo > 1500) {               // état envoyé au panneau du PC
+    lastHandInfo = nowS;
+    send({ t: "info", txt: `(${vw}×${vh}) — main : ${lastHands.length ? lastHands.length + " détectée(s) ✓" : "aucune"}` });
+  }
   const out = [];
   const roi = cfg.roi ? expand(cfg.roi, 0.08) : null;
   (res.landmarks || []).forEach((lm, i) => {
@@ -363,6 +382,15 @@ function drawOverlay() {
     octx.strokeStyle = "#38bdf8"; octx.lineWidth = 2; octx.beginPath();
     cfg.roi.forEach((p, i) => i ? octx.lineTo(p[0] * ov.width, p[1] * ov.height) : octx.moveTo(p[0] * ov.width, p[1] * ov.height));
     octx.closePath(); octx.stroke();
+  }
+  if (cfg.mode === "doigt") {                     // squelette de la main : on voit ce que l'IA reconnaît
+    octx.strokeStyle = "rgba(56,189,248,0.9)"; octx.lineWidth = 2;
+    lastHands.forEach(h => {
+      HAND_LINKS.forEach(([a, b]) => { octx.beginPath(); octx.moveTo(h[a][0] * ov.width, h[a][1] * ov.height);
+                                       octx.lineTo(h[b][0] * ov.width, h[b][1] * ov.height); octx.stroke(); });
+    });
+    if (!hand && !handError) { octx.fillStyle = "#facc15"; octx.font = "16px sans-serif";
+      octx.fillText(cfg.model ? "Chargement de l'IA de la main…" : "En attente du modèle de la main (PC)…", 16, ov.height - 20); }
   }
   const col = { blanc: "#fff", rouge: "#f87171", vert: "#4ade80", bleu: "#60a5fa", doigt: "#facc15" };
   lastBlobs.forEach(b => {

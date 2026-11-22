@@ -356,7 +356,7 @@ class CalibWindow(ProjectedWindow):
             self.auto_step, self.auto_t = 0, time.time()
             self.message = "Calibrage automatique… ne bougez pas la caméra"
         elif self.finger:
-            self.message = "Placez l'index au centre de la cible jaune et pincez (pouce + index)"
+            self.message = "Pointez l'index au centre de la cible et gardez-le immobile 1 s (ou pincez)"
         else:
             self.message = "Appuyez le stylet au centre de la cible jaune"
         self.timer.start()
@@ -372,22 +372,50 @@ class CalibWindow(ProjectedWindow):
     def feed(self, blobs):
         if self.mode != "pen" or self.i >= 4:
             return
-        blobs = [b for b in blobs if len(b) < 5 or b[4]]   # doigt : seulement quand on pince
         now = time.time()
+        if self.finger:
+            self._feed_finger(blobs, now)
+            self.update()
+            return
         if blobs:
             self.samples.append(blobs[0][:2])
             self.last_seen = now
         elif len(self.samples) >= 10 and now - self.last_seen > 0.25:
-            pts = np.array(self.samples[3:], float)
-            self.cam_pts.append(tuple(np.median(pts, axis=0)))
-            self.samples = []
-            self.i += 1
-            if self.i == 4:
-                H = vision.homography(self.cam_pts, self.targets)
-                self._done(H)
+            self._accept()
         elif self.samples and len(self.samples) < 10 and now - self.last_seen > 0.4:
             self.samples = []
         self.update()
+
+    def _accept(self):
+        pts = np.array(self.samples[3:] or self.samples, float)
+        self.cam_pts.append(tuple(np.median(pts, axis=0)))
+        self.samples = []
+        self.i += 1
+        self.wait_until = time.time() + 1.0          # petite pause avant la cible suivante
+        if self.i == 4:
+            H = vision.homography(self.cam_pts, self.targets)
+            self._done(H)
+
+    def _feed_finger(self, blobs, now):
+        """Doigt : pincer OU garder l'index immobile ~1 s sur la cible."""
+        if now < getattr(self, "wait_until", 0):
+            self.samples = []
+            return
+        if not blobs:
+            self.samples = []
+            return
+        b = blobs[0]
+        self.samples.append((b[0], b[1], now, bool(b[4]) if len(b) > 4 else False))
+        self.samples = [q for q in self.samples if now - q[2] <= 1.2]
+        if len(self.samples) < 6:
+            return
+        xs = np.array([q[0] for q in self.samples])
+        ys = np.array([q[1] for q in self.samples])
+        steady = (xs.max() - xs.min()) < 0.012 and (ys.max() - ys.min()) < 0.012
+        pinched = sum(q[3] for q in self.samples) >= 6
+        if (steady and now - self.samples[0][2] >= 1.0) or pinched:
+            self.samples = [(q[0], q[1]) for q in self.samples[-8:]]
+            self._accept()
 
     def _tick(self):
         if self.mode != "auto":
@@ -454,6 +482,6 @@ class CalibWindow(ProjectedWindow):
         p.setFont(f)
         txt = "Échap = annuler"
         if self.samples:
-            txt = "Maintenez…" if len(self.samples) < 10 else ("Relâchez" if self.finger else "Relâchez le stylet")
+            txt = "Ne bougez plus…" if self.finger else ("Maintenez…" if len(self.samples) < 10 else "Relâchez le stylet")
             p.setPen(QColor(0, 150, 0))
         p.drawText(QRectF(0, self.height() / 2, self.width(), 40), Qt.AlignCenter, txt)
