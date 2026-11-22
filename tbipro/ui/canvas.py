@@ -561,7 +561,8 @@ class InkCanvas(QWidget):
         self.update()
 
     # -------------------------------------------------------------- sélection
-    SEL_ACTIONS = [("delete", "🗑"), ("duplicate", "⧉"), ("front", "⬆"), ("back", "⬇"), ("edit", "✏"), ("fill", "◧")]
+    SEL_ACTIONS = [("delete", "🗑"), ("duplicate", "⧉"), ("front", "⬆"), ("back", "⬇"), ("edit", "✏"), ("fill", "◧"),
+                   ("shape", "⬠")]
 
     def _sel_valid(self):
         if self.selected is not None and not any(it is self.selected for it in self.page["items"]):
@@ -586,7 +587,8 @@ class InkCanvas(QWidget):
         rot = (top[0] + 46 * math.sin(a), top[1] - 46 * math.cos(a))
         W, H = self.page["size"]
         acts = [a_ for a_ in self.SEL_ACTIONS if not (a_[0] == "edit" and it["k"] != "text")
-                and not (a_[0] == "fill" and it["k"] not in FILLABLE)]
+                and not (a_[0] == "fill" and it["k"] not in FILLABLE)
+                and not (a_[0] == "shape" and it["k"] != "stroke")]
         by = max(p[1] for p in cs) + 44
         if by > H - 30:
             by = min(p[1] for p in cs) - 44
@@ -617,6 +619,16 @@ class InkCanvas(QWidget):
             c["fill"] = not it.get("fill")
             items[items.index(it)] = c
             self.selected = c
+        elif name == "shape":                      # trait à main levée → forme géométrique nette
+            shape = recognize.recognize_shape(it["pts"])
+            if shape is None:
+                self.page["undo"].pop()
+                self.toast("Forme non reconnue")
+                return
+            shape.update(c=it["c"], w=it["w"])
+            items[items.index(it)] = shape
+            self.selected = shape
+            self.toast("Forme redressée")
         elif name == "edit":
             self.page["undo"].pop()
             self.edit_text_requested.emit(it)
